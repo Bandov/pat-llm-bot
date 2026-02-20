@@ -1,0 +1,53 @@
+#define OK_STATUS 1;
+#define FAIL_STATUS 0;
+#define ANSWER_THRESHOLD 2;
+#define COORDINATOR_ROLE 1;
+#define PROCESSOR_ROLE 2;
+#define NODE1_ID 1;
+#define NODE2_ID 2;
+#define NODE3_ID 3;
+
+var coordinatorArray[3] = [1, 2, 3];
+var role = PROCESSOR_ROLE;
+var answerCount = 0;
+
+Node1() = 
+    [role == PROCESSOR_ROLE] send_test_message -> Node1()
+    [] [role == COORDINATOR_ROLE] send_ok_status_message -> Node1()
+    [] [role == COORDINATOR_ROLE] send_fail_status_message -> Node1()
+    [] send_election_message -> Node1()
+    [] send_answer_message -> Node1()
+    [] [role == PROCESSOR_ROLE && answerCount == 0] increment_answer_count_from_0{answerCount = 1;} -> Node1()
+    [] [role == PROCESSOR_ROLE && answerCount == 1] increment_answer_count_from_1{answerCount = 2;} -> Node1()
+    [] [role == PROCESSOR_ROLE && answerCount == 2] promote_to_coordinator{role = COORDINATOR_ROLE; coordinatorArray[0] = NODE1_ID;} -> Node1()
+    [] [role == COORDINATOR_ROLE] broadcast_coordinator_message -> Node1()
+    [] receive_coordinator_message_from_NODE2{role = PROCESSOR_ROLE; coordinatorArray[0] = NODE2_ID;} -> Node1()
+    [] receive_coordinator_message_from_NODE3{role = PROCESSOR_ROLE; coordinatorArray[0] = NODE3_ID;} -> Node1();
+
+Node2() = 
+    send_test_message -> Node2()
+    [] send_ok_status_message -> Node2()
+    [] send_fail_status_message -> Node2()
+    [] send_election_message -> Node2()
+    [] send_answer_message -> Node2()
+    [] broadcast_coordinator_message -> Node2()
+    [] receive_coordinator_message -> Node2();
+
+Node3() = 
+    send_test_message -> Node3()
+    [] send_ok_status_message -> Node3()
+    [] send_fail_status_message -> Node3()
+    [] send_election_message -> Node3()
+    [] send_answer_message -> Node3()
+    [] broadcast_coordinator_message -> Node3()
+    [] receive_coordinator_message -> Node3();
+
+Bully() = Node1() ||| Node2() ||| Node3();
+
+#define one_coordinator (coordinatorArray[0] == NODE1_ID || coordinatorArray[0] == NODE2_ID || coordinatorArray[0] == NODE3_ID);
+#define node1_is_coordinator (coordinatorArray[0] == NODE1_ID);
+#define node1_leads_node2 (coordinatorArray[1] == NODE1_ID);
+#define node1_leads_node3 (coordinatorArray[2] == NODE1_ID);
+#assert Bully() |= [](one_coordinator);
+#assert Bully() |= []<>node1_is_coordinator;
+#assert Bully() |= [](node1_is_coordinator -> (node1_leads_node2 && node1_leads_node3));

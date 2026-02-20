@@ -1,0 +1,8 @@
+[
+  {
+    "assertion": "#assert Bully() |= [](node1_is_coordinator -> (node1_leads_node2 && node1_leads_node3));",
+    "trace": "<init>",
+    "current_result": "Invalid",
+    "desired_result": "Valid"
+  }
+]
