@@ -1,18 +1,18 @@
 import os
-import time
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+# The new SDK automatically looks for the GEMINI_API_KEY environment variable.
+# If your .env file is set up correctly, you don't need to pass it explicitly.
+client = genai.Client()
 
 def repair_snippet(full_code, rule, assertion):
     """
     Acts as the direct interface to Gemini. 
     Receives full context and returns full corrected code.
     """
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    
     prompt = f"""
     ### TASK
     Repair the following PAT CSP# model to satisfy this LTL property: {assertion}
@@ -27,7 +27,11 @@ def repair_snippet(full_code, rule, assertion):
     """
     
     try:
-        response = model.generate_content(prompt)
+        # The new method signature for the updated SDK
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
         # Remove any lingering backticks
         return response.text.strip().replace('```csp', '').replace('```', '')
     except Exception as e:
