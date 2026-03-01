@@ -6,6 +6,7 @@ import json
 from analyser import ProjectAnalyzer
 from engine import repair_snippet
 from verifier import run_pat_verification
+from rules import RULES 
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -47,7 +48,12 @@ def repair_model_file(model_name, analyzer):
         assertion_text = entry.get('assertion')
         print(f"🛠️  Calling Gemini for full-context repair on: {assertion_text}")
 
-        repaired_content = repair_snippet(current_full_content, "General PAT Repair", assertion_text)
+        # 👈 Grab the default rule from your rules.py file
+        # (You can later expand this to select specific rules based on the assertion_text)
+        active_rule = RULES.get("default", "Maintain standard PAT CSP syntax.")
+
+        # 👈 Pass the active rule into the engine so Gemini sees it
+        repaired_content = repair_snippet(current_full_content, active_rule, assertion_text)
 
         if repaired_content:
             current_full_content = sanitize_pat_syntax(repaired_content)

@@ -1,73 +1,76 @@
 import subprocess
-import re
-import json
 import os
+import re
 
-PAT_CONSOLE_PATH = "/Users/dom/Desktop/PAT/PAT3.Console.exe"
+# Dynamic Pathing to ensure it works on your specific Windows path
+ROOT_PATH = os.path.dirname(os.path.abspath(__file__))
+PAT_EXE_PATH = os.path.normpath(os.path.join(ROOT_PATH, "PAT", "PAT3.Console.exe"))
+PAT_FOLDER = os.path.normpath(os.path.join(ROOT_PATH, "PAT"))
 
-def run_pat_verification(model_path, output_json="mismatch_traces.json"):
-    if not os.path.exists(PAT_CONSOLE_PATH):
-        print(f"❌ Error: PAT Console executable not found at {PAT_CONSOLE_PATH}")
-        return False
-
-    print(f"🔎 Verifying {os.path.basename(model_path)}...")
-
-    abs_model_path = os.path.abspath(model_path)
-    report_file = abs_model_path + ".log"
+def run_simple_verification(model_name, pat_code):
+    """
+    Runs the PAT verifier and notifies you immediately of any failures or syntax errors.
+    """
+    # 1. Setup temporary workspace
+    temp_folder = os.path.join(ROOT_PATH, "temp_verification", model_name)
+    os.makedirs(temp_folder, exist_ok=True)
     
-    # Restored the required report_file argument
-    cmd = ["mono", PAT_CONSOLE_PATH, "-csp", "-v", abs_model_path, report_file]
-    
+    input_file = os.path.abspath(os.path.join(temp_folder, "model.csp"))
+    output_file = os.path.abspath(os.path.join(temp_folder, "output.txt"))
+
+    # Write the code to the input file
+    with open(input_file, 'w', encoding='utf-8') as f:
+        f.write(pat_code)
+
+    # 2. Command for Windows (direct EXE call)
+    command = ["mono", PAT_EXE_PATH, "-csp", input_file, output_file]
+
+    print(f"🔎 Verifying {model_name}...")
+
     try:
-        # We still capture stdout just in case other modules complain
-        result = subprocess.run(cmd, timeout=45, capture_output=True, text=True)
+        # 3. Execute PAT
+        # capture_output=True allows us to see errors if the file isn't created
+        result = subprocess.run(
+            command, 
+            check=False, # Set to False to handle PAT's own exit codes manually
+            timeout=120, 
+            cwd=PAT_FOLDER, 
+            capture_output=True, 
+            text=True
+        )
         
-        if "Could not load" in result.stdout or result.stderr:
-            print("\n=== 🛑 PAT INITIALIZATION WARNINGS ===")
-            print(result.stdout)
-            print(result.stderr)
-            
+        # 4. Handle Results
+        if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                output = f.read()
+
+            if "is Valid" in output or "is VALID" in output:
+                print(f"✅ SUCCESS: {model_name} assertions are Valid.")
+            else:
+                print(f"❌ FAIL: {model_name} assertions failed (Invalid).")
+                if "********Verification Result********" in output:
+                    result_section = output.split("********Verification Result********")[1].split("********")[0]
+                    print(f"Detail: {result_section.strip()}")
+        else:
+            # 5. Diagnostic: If no file, show what the console actually said
+            print(f"⚠️ ERROR: PAT failed to produce a verification result.")
+            if result.stdout or result.stderr:
+                print("--- PAT Console Output ---")
+                if result.stdout: print(result.stdout)
+                if result.stderr: print(result.stderr)
+            else:
+                print("No console output received. Ensure PAT3.Console.exe is valid and unblocked.")
+
+    except subprocess.TimeoutExpired:
+        print(f"⏰ TIMEOUT: PAT took too long (>120s) for {model_name}.")
     except Exception as e:
-        print(f"   ❌ Execution failed: {e}")
-        return False
+        print(f"❓ SYSTEM ERROR: {str(e)}")
 
-    errors = []
-    
-    # Parse the actual report file PAT generated
-    if os.path.exists(report_file):
-        with open(report_file, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-            
-        print("\n=== 📄 PAT REPORT OUTPUT ===")
-        print(content.strip())
-        print("============================\n")
-        
-        # Regex to find failing assertions
-        failure_pattern = r"Assertion\s+(.*?)\s+is\s+(?:NOT valid|Invalid)"
-        matches = re.findall(failure_pattern, content, re.IGNORECASE)
-
-        for assertion in matches:
-            clean_assert = assertion.strip()
-            errors.append({
-                "assertion": clean_assert,
-                "status": "failed",
-                "model_file": model_path
-            })
-            print(f"   🚩 Found violation: {clean_assert}")
-            
-        os.remove(report_file) # Clean up the log file
-    else:
-        print(f"   ⚠️ Warning: PAT did not create the report file. It may have crashed.")
-
-    # Save to JSON for the repair engine
-    if errors:
-        with open(output_json, 'w') as f:
-            json.dump(errors, f, indent=4)
-        print(f"   💾 Saved {len(errors)} errors to {output_json}")
-        return True
-    else:
-        print("   ✅ No verification errors found. Model satisfies all assertions.")
-        if os.path.exists(output_json):
-            with open(output_json, 'w') as f:
-                json.dump([], f)
-        return False
+if __name__ == '__main__':
+    # Test with a simple model
+    test_code = """
+    var x = 0;
+    P = set_x_1 -> SKIP;
+    #assert P reaches x == 1;
+    """
+    run_simple_verification("SimpleTest", test_code)

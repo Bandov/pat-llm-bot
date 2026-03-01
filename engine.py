@@ -17,6 +17,9 @@ def repair_snippet(full_code, rule, assertion):
     ### TASK
     Repair the following PAT CSP# model to satisfy this LTL property: {assertion}
     
+    ### STRICT REPAIR RULES
+    {rule}
+    
     ### FULL MODEL
     {full_code}
     
