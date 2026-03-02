@@ -1,41 +1,36 @@
 """
 Rules configuration for the Model Repair Engine.
-These rules guide the LLM to maintain formal logic and syntax integrity.
+Generalized patterns for fixing Safety, Liveness, and Syntax in PAT CSP#.
 """
 
 RULES = {
-    # The default rule is applied when an event name doesn't have a specific rule.
     "default": (
-        "1. ATOMIC SYNCHRONIZATION: All state updates (variables and arrays) MUST be "
-        "wrapped in a single 'atomic{}' block to ensure property consistency.\n"
-        "2. SCOPE INTEGRITY: Only use variables and constants defined in the model. "
-        "Do not invent new state variables like 'node_state' or 'status'.\n"
-        "3. SYNTAX: Ensure the transition follows the format: event{atomic{...}} -> ProcessName().\n"
-        "4. CHOICE CHAIN: Do not include a trailing semicolon (;) at the end of the line. "
-        "The Choice Operator '[]' must be able to follow this line immediately."
+        "1. NO PROSE: Return ONLY raw CSP# code. No conversational filler or markdown.\n"
+        "2. FULL-FILE REWRITE: Return the ENTIRE model. Do not use snippets.\n"
+        "3. SEMICOLON DISCIPLINE: Every '#define' and 'var' MUST end with a semicolon (;).\n"
+        "4. STATE UPDATES: Use '{var = val;}'—STRICTLY FORBIDDEN to use the 'atomic' keyword.\n"
+        "5. DEDUPLICATION: Declare each 'var' and process EXACTLY once. Group vars at the top."
     ),
 
-    "init": (
-        "1. GLOBAL STATE: Ensure all variables in the 'var' section are initialized "
-        "to a neutral state (e.g., 0 or PROCESSOR_ROLE).\n"
-        "2. ARRAY CONSISTENCY: Ensure arrays like 'coordinatorArray' are fully initialized "
-        "to match the required system size."
+    "safety": (
+        "1. EXIT GUARD: To fix P -> Q violations, inhibit the Provider from stopping if a "
+        "Consumer is active: [Provider_Active && Class_Empty] stop -> ...\n"
+        "2. INVARIANT ALIGNMENT: Ensure guards match the macro definitions exactly."
     ),
 
-    "promote_to_coordinator": (
-        "1. SELF-ELECTION: When a node promotes itself, it must update its 'role' to "
-        "COORDINATOR_ROLE and set ALL indices of 'coordinatorArray' to its own ID.\n"
-        "2. ATOMICITY: These updates must happen in one atomic step to satisfy safety assertions."
+    "liveness": (
+        "1. STUTTERING PREVENTION: If the trace shows a process repeating the same two events "
+        "without progress (e.g., start -> stop -> start), add a 'Progress Guard'.\n"
+        "2. FAIRNESS (ANTI-HOGGING): If one process prevents others from acting, add a "
+        "turn-taking variable or a guard that forces the process to yield after an action.\n"
+        "   - Example: var turn = 1; ... [turn == 1] action{turn = 2;} -> Proc()\n"
+        "3. LIVENESS COMPLETION: For []<>Goal, ensure every cycle in the state graph contains "
+        "the 'Goal' event or a state where the 'Goal' condition is true."
     ),
 
-    "receive_coordinator_message": (
-        "1. FOLLOWER SYNC: When receiving a message, update 'role' to PROCESSOR_ROLE "
-        "and synchronize ALL indices of 'coordinatorArray' to the sender's ID.\n"
-        "2. GLOBAL VIEW: The property depends on Node1 knowing who leads Node2 and Node3; "
-        "therefore, update indices [0], [1], and [2] simultaneously."
+    "lifecycle_coupling": (
+        "1. STARVATION CHECK: Ensure that guards added for Safety do not accidentally "
+        "create a deadlock that violates Liveness. Every 'start' must eventually have a 'stop' "
+        "path that is reachable."
     )
 }
-
-# Mapping specific event variants to their general rules
-RULES["receive_coordinator_message_from_NODE2"] = RULES["receive_coordinator_message"]
-RULES["receive_coordinator_message_from_NODE3"] = RULES["receive_coordinator_message"]

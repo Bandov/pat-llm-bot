@@ -1,76 +1,58 @@
 import subprocess
 import os
-import re
+import time
 
-# Dynamic Pathing to ensure it works on your specific Windows path
-ROOT_PATH = os.path.dirname(os.path.abspath(__file__))
-PAT_EXE_PATH = os.path.normpath(os.path.join(ROOT_PATH, "PAT", "PAT3.Console.exe"))
-PAT_FOLDER = os.path.normpath(os.path.join(ROOT_PATH, "PAT"))
-
-def run_simple_verification(model_name, pat_code):
-    """
-    Runs the PAT verifier and notifies you immediately of any failures or syntax errors.
-    """
-    # 1. Setup temporary workspace
-    temp_folder = os.path.join(ROOT_PATH, "temp_verification", model_name)
-    os.makedirs(temp_folder, exist_ok=True)
+def run_remote_verification(model_name, pat_code):
+    local_csp = "temp_model.csp"
+    local_out = "result.txt"
     
-    input_file = os.path.abspath(os.path.join(temp_folder, "model.csp"))
-    output_file = os.path.abspath(os.path.join(temp_folder, "output.txt"))
-
-    # Write the code to the input file
-    with open(input_file, 'w', encoding='utf-8') as f:
+    with open(local_csp, 'w', encoding='utf-8') as f:
         f.write(pat_code)
 
-    # 2. Command for Windows (direct EXE call)
-    command = ["mono", PAT_EXE_PATH, "-csp", input_file, output_file]
-
-    print(f"🔎 Verifying {model_name}...")
+    print(f"🔎 Verifying {model_name} (Clean-Room Strategy)...")
 
     try:
-        # 3. Execute PAT
-        # capture_output=True allows us to see errors if the file isn't created
-        result = subprocess.run(
-            command, 
-            check=False, # Set to False to handle PAT's own exit codes manually
-            timeout=120, 
-            cwd=PAT_FOLDER, 
-            capture_output=True, 
-            text=True
-        )
+        # Push model
+        subprocess.run(["docker", "cp", local_csp, "pat-bridge:/model.csp"], check=True)
+
+        # Execute from /app/PAT using standard -csp flag
+        # MONO_REGISTRY_PATH is added to prevent some common Mono crashes on Mac
+        docker_cmd = [
+            "docker", "exec", "pat-bridge", "sh", "-c",
+            "cd /app/PAT && "
+            "export MONO_IOMAP=all && "
+            "export MONO_REGISTRY_PATH=/tmp/mono-reg && "
+            "xvfb-run -a mono PAT3.Console.exe -csp /model.csp /output.txt"
+        ]
         
-        # 4. Handle Results
-        if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-            with open(output_file, 'r', encoding='utf-8') as f:
-                output = f.read()
+        start_time = time.time()
+        result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=120)
+        print(f"⏱️ Time: {time.time() - start_time:.2f}s")
 
-            if "is Valid" in output or "is VALID" in output:
-                print(f"✅ SUCCESS: {model_name} assertions are Valid.")
-            else:
-                print(f"❌ FAIL: {model_name} assertions failed (Invalid).")
-                if "********Verification Result********" in output:
-                    result_section = output.split("********Verification Result********")[1].split("********")[0]
-                    print(f"Detail: {result_section.strip()}")
-        else:
-            # 5. Diagnostic: If no file, show what the console actually said
-            print(f"⚠️ ERROR: PAT failed to produce a verification result.")
-            if result.stdout or result.stderr:
-                print("--- PAT Console Output ---")
-                if result.stdout: print(result.stdout)
-                if result.stderr: print(result.stderr)
-            else:
-                print("No console output received. Ensure PAT3.Console.exe is valid and unblocked.")
+        # Pull result
+        cp_back = subprocess.run(["docker", "cp", "pat-bridge:/output.txt", local_out], capture_output=True)
+        
+        if cp_back.returncode != 0:
+            print("❌ PAT Error: No result file produced.")
+            # If we see 'Invalid Image' here, it means Module.CSP.dll is still not being loaded
+            if "Invalid Image" in result.stdout:
+                print("⚠️ Still seeing Invalid Image. Checking CSP DLL bitness...")
+                subprocess.run(["docker", "exec", "pat-bridge", "file", "/app/PAT/Modules/CSP/PAT.Module.CSP.dll"])
+            return
 
-    except subprocess.TimeoutExpired:
-        print(f"⏰ TIMEOUT: PAT took too long (>120s) for {model_name}.")
+        if os.path.exists(local_out):
+            with open(local_out, 'r') as f:
+                content = f.read()
+                if "is Valid" in content or "is VALID" in content:
+                    print(f"✅ SUCCESS: {model_name} is Valid.")
+                else:
+                    print(f"❌ FAIL: {model_name} is Invalid.")
+
     except Exception as e:
-        print(f"❓ SYSTEM ERROR: {str(e)}")
+        print(f"❓ System Error: {e}")
+    finally:
+        if os.path.exists(local_csp): os.remove(local_csp)
 
 if __name__ == '__main__':
-    # Test with a simple model
-    test_code = """
-    var x = 0;
-    P = set_x_1 -> SKIP;
-    #assert P reaches x == 1;
-    """
-    run_simple_verification("SimpleTest", test_code)
+    test_csp = "P = SKIP; #assert P reaches True;"
+    run_remote_verification("FinalBridgeTest", test_csp)

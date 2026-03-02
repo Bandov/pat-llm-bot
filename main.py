@@ -1,102 +1,82 @@
 import os
-import warnings
-import re
 import json
+import shutil
+from engine import RepairEngine
 
-from analyser import ProjectAnalyzer
-from engine import repair_snippet
-from verifier import run_pat_verification
-from rules import RULES 
+MODELS_DIR = "./models"
+OUTPUT_DIR = "./repaired_models"
+LOG_FILE = "mismatch_traces.json"
 
-warnings.filterwarnings("ignore", category=FutureWarning)
-
-MODELS_DIR = "models"
-OUTPUT_DIR = "repaired_models"
-JSON_LOG = "mismatch_traces.json"
-
-def sanitize_pat_syntax(content):
-    """
-    Cleans up common LLM syntax hallucinations for PAT CSP#.
-    """
-    # 1. Fix Double Arrows: "-> Node() -> Node()" -> "-> Node()"
-    content = re.sub(r'(->\s*\w+\(\))\s*->\s*\w+\(\)', r'\1', content)
-    
-    # 2. Choice Operator Fix: PAT lines within a choice block must not end in ';'
-    lines = content.split('\n')
-    fixed_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if '->' in stripped and stripped.endswith(')'):
-            line = line.rstrip(';')
-        fixed_lines.append(line)
-    
-    return "\n".join(fixed_lines)
-
-def repair_model_file(model_name, analyzer):
-    model_path = os.path.join(MODELS_DIR, model_name)
-    repaired_path = os.path.join(OUTPUT_DIR, f"repaired_{model_name}")
-
-    if not os.path.exists(model_path):
-        print(f"❌ Model file {model_name} not found.")
+def main():
+    try:
+        engine = RepairEngine()
+    except Exception as e:
+        print(f"[!] Initialization Error: {e}")
         return
+    
+    if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
 
-    with open(model_path, "r") as f:
-        current_full_content = f.read()
+    with open(LOG_FILE, 'r') as f:
+        errors = json.load(f)
 
-    # Loop through the dynamic errors found by the verifier
-    for entry in analyzer.errors:
+    # Dictionary to track the 'current best version' of each model
+    # Key: original_filename, Value: path_to_latest_version
+    active_workspace = {}
+
+    print(f"[*] Starting repair pipeline for {len(errors)} failures...")
+
+    for i, entry in enumerate(errors):
         assertion_text = entry.get('assertion')
-        print(f"🛠️  Calling Gemini for full-context repair on: {assertion_text}")
+        error_trace = entry.get('trace')
+        
+        # 1. FIND THE FILE: Scan original models AND current repaired workspace
+        target_file = None
+        current_content = ""
+        original_name = ""
 
-        # 👈 Grab the default rule from your rules.py file
-        # (You can later expand this to select specific rules based on the assertion_text)
-        active_rule = RULES.get("default", "Maintain standard PAT CSP syntax.")
+        # Check workspace first (to continue from previous fix)
+        for f_name in os.listdir(OUTPUT_DIR):
+            if f_name.endswith(".csp"):
+                with open(os.path.join(OUTPUT_DIR, f_name), 'r') as f:
+                    content = f.read()
+                    if assertion_text in content:
+                        target_file = os.path.join(OUTPUT_DIR, f_name)
+                        current_content = content
+                        original_name = f_name.replace("repaired_", "")
+                        break
+        
+        # If not in workspace, check original models
+        if not target_file:
+            for f_name in os.listdir(MODELS_DIR):
+                if f_name.endswith(".csp"):
+                    with open(os.path.join(MODELS_DIR, f_name), 'r') as f:
+                        content = f.read()
+                        if assertion_text in content:
+                            target_file = os.path.join(MODELS_DIR, f_name)
+                            current_content = content
+                            original_name = f_name
+                            break
 
-        # 👈 Pass the active rule into the engine so Gemini sees it
-        repaired_content = repair_snippet(current_full_content, active_rule, assertion_text)
-
-        if repaired_content:
-            current_full_content = sanitize_pat_syntax(repaired_content)
-            print(f"   ✅ Content updated and sanitized.")
-
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-
-    with open(repaired_path, "w") as f:
-        f.write(current_full_content)
-    
-    print(f"✨ Final repaired model saved: {repaired_path}")
-
-def run_pipeline():
-    # Ensure directories exist
-    if not os.path.exists(MODELS_DIR):
-        os.makedirs(MODELS_DIR)
-        print(f"📁 Created '{MODELS_DIR}' directory. Please place your .csp models inside.")
-        return
-
-    target_models = [f for f in os.listdir(MODELS_DIR) if f.endswith(".csp")]
-
-    if not target_models:
-        print("⚠️ No .csp files found in the models directory.")
-        return
-
-    for model_name in target_models:
-        model_path = os.path.join(MODELS_DIR, model_name)
-        print(f"\n🚀 Pipeline Entry: {model_name}")
-
-        # 1. RUN VERIFICATION (Generates JSON dynamically)
-        has_errors = run_pat_verification(model_path, JSON_LOG)
-
-        # 2. RUN REPAIR (If verification failed)
-        if has_errors:
-            # Load the fresh JSON generated by the verifier
-            analyzer = ProjectAnalyzer(JSON_LOG)
-            repair_model_file(model_name, analyzer)
+        if not target_file:
+            print(f"[!] Skip: Assertion '{assertion_text}' not found in any file.")
+            continue
             
-            # Optional: You could recursively call run_pat_verification here 
-            # on the newly saved file in OUTPUT_DIR to see if Gemini actually fixed it!
-        else:
-            print(f"⏭️  Skipping repair for {model_name} (No assertions failed).")
+        print(f"\n[Step {i+1}] Repairing {original_name} for: {assertion_text}")
+
+        # 2. REPAIR: Pass the LATEST content to the engine
+        repaired_model = engine.request_repair(
+            full_context=current_content,
+            error_log=f"Assertion: {assertion_text}\nTrace: {error_trace}"
+        )
+
+        # 3. UPDATE WORKSPACE: Overwrite the repaired version for the next pass
+        out_path = os.path.join(OUTPUT_DIR, f"repaired_{original_name}")
+        with open(out_path, 'w') as f:
+            f.write(repaired_model)
+            
+        print(f"    [SUCCESS] Updated workspace file: {out_path}")
+
+    print("\n[*] Pipeline complete. Check ./repaired_models for the final versions.")
 
 if __name__ == "__main__":
-    run_pipeline()
+    main()
