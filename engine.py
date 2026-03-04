@@ -1,71 +1,90 @@
 import os
-import re
 import time
-import google.generativeai as genai
+import re
 from dotenv import load_dotenv
+from google import genai
+from rules import RULES
 
 load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
 
-if api_key:
-    genai.configure(api_key=api_key)
-else:
-    print("❌ Error: GEMINI_API_KEY not found. Please check your .env file.")
-
-def repair_snippet(snippet, rule, assertion):
-    model_id = 'models/gemini-2.5-flash'
-    
-    try:
-        # 65s delay is safer if you've been hitting the 429 limit recently
-        print("⏳ Quota safety delay...")
-        time.sleep(5) 
-
-        model = genai.GenerativeModel(model_id)
+class RepairEngine:
+    def __init__(self):
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY missing from .env")
         
-        # Refined prompt for pure logic generation
+        self.client = genai.Client(api_key=api_key)
+        self.model_id = 'gemini-3-flash-preview'
+
+    def _global_sanitizer(self, code):
+        """Final structural check to ensure single declarations and clean syntax."""
+        lines = code.split('\n')
+        seen_headers = set()
+        clean_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                clean_lines.append(""); continue
+
+            # 1. Deduplicate: var, #define, or Process() =
+            header_match = re.match(r'^(var\s+\w+|#define\s+\w+|\w+\(\)\s*=)', stripped)
+            if header_match:
+                header = header_match.group(1)
+                if header in seen_headers: continue 
+                seen_headers.add(header)
+            
+            # 2. Strip 'atomic' keyword (Parser Error Fix)
+            line = re.sub(r'\{atomic\s*\{(.*?)\}\s*\}', r'{\1}', line)
+            line = line.replace("atomic{", "{")
+            
+            # 3. Ensure #define/var end with ;
+            if stripped.startswith(("#define", "var")) and not stripped.endswith(";"):
+                line = stripped + ";"
+            
+            clean_lines.append(line)
+            
+        return '\n'.join(clean_lines)
+
+    def request_repair(self, full_context, error_log):
+        # Determine strategy: Does the log contain Liveness operators?
+        is_liveness = "[]<>" in error_log or "SCC" in error_log
+        strategy_list = [RULES["default"]]
+        
+        if is_liveness:
+            strategy_list.append(RULES["liveness"])
+        else:
+            strategy_list.append(RULES["safety"])
+            strategy_list.append(RULES["lifecycle_coupling"])
+
         prompt = f"""
-        ### TASK
-        Repair ONLY the internal logic of this CSP# transition: {snippet}
-        Property: {assertion}
+        Role: Formal Methods Expert (PAT CSP#).
+        Task: Fix the Liveness/Safety failure in the FULL model below.
         
-        ### VARIABLES
-        - coordinatorArray (indices 0, 1, 2)
-        - role, answerCount
+        [STRATEGY]
+        {" ".join(strategy_list)}
         
-        ### SYNTAX REQUIREMENTS
-        1. Output format: event_name{{atomic{{ assignments }}}} -> Node1()
-        2. NO semicolons (;) outside of the curly braces.
-        3. NO double arrows (->). 
-        4. NO explanations. Return ONLY the code line.
+        [VERIFICATION FAILURE]
+        {error_log}
+        
+        [ORIGINAL MODEL]
+        {full_context}
+        
+        Return the FULL repaired model. No prose. No 'atomic'. No duplicates.
         """
-        
-        response = model.generate_content(prompt)
-        raw_text = response.text.strip()
-        
-        # --- POST-PROCESSING: THE SYNTAX GUARD ---
-        
-        # 1. Remove markdown and prose
-        clean_line = [l.strip() for l in raw_text.split('\n') if '->' in l]
-        if not clean_line: return None
-        repaired = clean_line[-1].replace('```csp', '').replace('```', '').strip()
 
-        # 2. Fix Double Arrows (Normalization)
-        # Finds any sequence of "-> Process()" and ensures only one remains at the end
-        repaired = re.sub(r'->\s*\w+\(\).*$', '', repaired).strip()
-        repaired += " -> Node1()"
+        try:
+            print(f"[*] Calling {self.model_id} for repair...")
+            response = self.client.models.generate_content(model=self.model_id, contents=prompt)
+            output = self._clean_output(response.text)
+            return self._global_sanitizer(output)
+        except Exception as e:
+            if "429" in str(e):
+                print("[!] Quota hit. Waiting 60s..."); time.sleep(60)
+                return self.request_repair(full_context, error_log)
+            return f"Error: {str(e)}"
 
-        # 3. Clean up internal semicolons and dangling syntax
-        # Ensures no semicolon exists after the final brace before the arrow
-        repaired = repaired.replace(';}', '}').replace('}}', '}}')
-        
-        # 4. Final Semicolon Strip (Crucial for the [] Choice operator)
-        # We find the LAST arrow and cut everything after it to prevent terminal ';'
-        if "->" in repaired:
-            base, target = repaired.split("->")
-            repaired = f"{base.strip().rstrip(';')} -> {target.strip().rstrip(';')}"
-
-        return repaired
-
-    except Exception as e:
-        print(f"   ❌ Engine Error: {e}")
-        return None
+    def _clean_output(self, text):
+        text = text.replace("```csp", "").replace("```", "").strip()
+        match = re.search(r'(#define|var|[\w]+\(\)\s*=)', text)
+        return text[match.start():] if match else text

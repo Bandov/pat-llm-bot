@@ -1,99 +1,82 @@
 import os
-import warnings
-from analyser import ProjectAnalyzer, find_process_block
-from engine import repair_snippet
-from rules import RULES
+import json
+import shutil
+from engine import RepairEngine
 
-# Suppress the deprecation warning for the old SDK
-warnings.filterwarnings("ignore", category=FutureWarning)
+MODELS_DIR = "./models"
+OUTPUT_DIR = "./repaired_models"
+LOG_FILE = "mismatch_traces.json"
 
-# --- CONFIGURATION ---
-MODELS_DIR = "models"
-OUTPUT_DIR = "repaired_models"
-JSON_LOG = "mismatch_traces.json"
-
-def process_single_repair(csp_content, event_name, entry):
-    """
-    Coordinates with Gemini to fix a specific block of code.
-    Returns the updated full content of the file.
-    """
-    assertion_text = entry.get('assertion')
-    # Use the specific rule for the event, or fallback to the general default rule
-    rule = RULES.get(event_name, RULES.get("default", "Repair state inconsistency."))
-
-    print(f"   🔎 Slicing code for event: '{event_name}'")
-    
-    # Extract the specific snippet (the var block or the process line)
-    snippet = find_process_block(csp_content, event_name)
-
-    if not snippet:
-        print(f"   ⚠️ Could not find code block for '{event_name}'. Skipping...")
-        return None
-
-    print(f"   🤖 Requesting repair from Gemini 2.5 Flash...")
-    new_snippet = repair_snippet(snippet, rule, assertion_text)
-
-    if new_snippet:
-        # Perform surgical replacement
-        updated_content = csp_content.replace(snippet, new_snippet)
-        return updated_content
-    
-    return None
-
-def repair_model_file(model_name, analyzer):
-    """Processes all errors and saves a single, fully repaired file."""
-    model_path = os.path.join(MODELS_DIR, model_name)
-    repaired_path = os.path.join(OUTPUT_DIR, f"repaired_{model_name}")
-
-    if not os.path.exists(model_path):
-        print(f"❌ Model file {model_name} not found.")
+def main():
+    try:
+        engine = RepairEngine()
+    except Exception as e:
+        print(f"[!] Initialization Error: {e}")
         return
-
-    # 1. Read the WHOLE original file
-    with open(model_path, "r") as f:
-        current_full_content = f.read()
-
-    # 2. Iterate through each error in the JSON log
-    for entry in analyzer.errors:
-        # Get all relevant events using the Deep Scan logic from analyser.py
-        targets = analyzer.get_repair_targets(entry, current_full_content)
-        print(f"👉 Found {len(targets)} relevant events for repair: {targets}")
-
-        for event in targets:
-            # Accumulate the changes into current_full_content
-            result = process_single_repair(current_full_content, event, entry)
-            if result:
-                current_full_content = result
-                print(f"   ✅ '{event}' block updated.")
-
-    # 3. Create output directory if it doesn't exist
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-
-    # 4. Save the final version
-    with open(repaired_path, "w") as f:
-        f.write(current_full_content)
     
-    print(f"\n✨ SUCCESS: Full repaired model saved to: {repaired_path}")
+    if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
 
-def run_pipeline():
-    """Main orchestrator for the repair process."""
-    if not os.path.exists(JSON_LOG):
-        print(f"❌ Error: {JSON_LOG} not found.")
-        return
+    with open(LOG_FILE, 'r') as f:
+        errors = json.load(f)
 
-    analyzer = ProjectAnalyzer(JSON_LOG)
-    
-    # Find all .csp files in the models directory
-    target_models = [f for f in os.listdir(MODELS_DIR) if f.endswith(".csp")]
+    # Dictionary to track the 'current best version' of each model
+    # Key: original_filename, Value: path_to_latest_version
+    active_workspace = {}
 
-    if not target_models:
-        print(f"❌ No .csp files found in {MODELS_DIR}/")
-        return
+    print(f"[*] Starting repair pipeline for {len(errors)} failures...")
 
-    for model_name in target_models:
-        print(f"\n🛠️  Starting Pipeline for: {model_name}")
-        repair_model_file(model_name, analyzer)
+    for i, entry in enumerate(errors):
+        assertion_text = entry.get('assertion')
+        error_trace = entry.get('trace')
+        
+        # 1. FIND THE FILE: Scan original models AND current repaired workspace
+        target_file = None
+        current_content = ""
+        original_name = ""
+
+        # Check workspace first (to continue from previous fix)
+        for f_name in os.listdir(OUTPUT_DIR):
+            if f_name.endswith(".csp"):
+                with open(os.path.join(OUTPUT_DIR, f_name), 'r') as f:
+                    content = f.read()
+                    if assertion_text in content:
+                        target_file = os.path.join(OUTPUT_DIR, f_name)
+                        current_content = content
+                        original_name = f_name.replace("repaired_", "")
+                        break
+        
+        # If not in workspace, check original models
+        if not target_file:
+            for f_name in os.listdir(MODELS_DIR):
+                if f_name.endswith(".csp"):
+                    with open(os.path.join(MODELS_DIR, f_name), 'r') as f:
+                        content = f.read()
+                        if assertion_text in content:
+                            target_file = os.path.join(MODELS_DIR, f_name)
+                            current_content = content
+                            original_name = f_name
+                            break
+
+        if not target_file:
+            print(f"[!] Skip: Assertion '{assertion_text}' not found in any file.")
+            continue
+            
+        print(f"\n[Step {i+1}] Repairing {original_name} for: {assertion_text}")
+
+        # 2. REPAIR: Pass the LATEST content to the engine
+        repaired_model = engine.request_repair(
+            full_context=current_content,
+            error_log=f"Assertion: {assertion_text}\nTrace: {error_trace}"
+        )
+
+        # 3. UPDATE WORKSPACE: Overwrite the repaired version for the next pass
+        out_path = os.path.join(OUTPUT_DIR, f"repaired_{original_name}")
+        with open(out_path, 'w') as f:
+            f.write(repaired_model)
+            
+        print(f"    [SUCCESS] Updated workspace file: {out_path}")
+
+    print("\n[*] Pipeline complete. Check ./repaired_models for the final versions.")
 
 if __name__ == "__main__":
-    run_pipeline()
+    main()
