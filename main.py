@@ -63,14 +63,47 @@ def main():
             
         print(f"\n[Step {i+1}] Repairing {original_name} for: {assertion_text}")
 
+        # 2. Gather all assertions in this model so the engine can avoid regressions.
+        model_assertions = [
+            line.strip()
+            for line in current_content.splitlines()
+            if line.strip().startswith("#assert")
+        ]
+        other_assertions = [a for a in model_assertions if a != assertion_text]
+
         # 2. REPAIR: Pass the LATEST content to the engine
-        repaired_model = engine.request_repair(
+        repair_result = engine.request_repair(
             full_context=current_content,
-            error_log=f"Assertion: {assertion_text}\nTrace: {error_trace}"
+            error_log=f"Assertion: {assertion_text}\nTrace: {error_trace}",
+            target_assertion=assertion_text,
+            other_assertions=other_assertions
         )
 
-        # 3. UPDATE WORKSPACE: Overwrite the repaired version for the next pass
         out_path = os.path.join(OUTPUT_DIR, f"repaired_{original_name}")
+
+        if repair_result.get("status") == "invalid_assertion":
+            invalid_model = repair_result.get("model", "").strip()
+            if invalid_model:
+                with open(out_path, 'w') as f:
+                    f.write(invalid_model)
+                print(f"    [UPDATED] Tagged invalid assertion in workspace file: {out_path}")
+
+            print(f"    [SKIP] Invalid assertion reported by engine.")
+            print(f"           Assertion: {assertion_text}")
+            print(f"           Reason: {repair_result.get('reason', 'No reason provided.')}")
+            continue
+
+        if repair_result.get("status") == "error":
+            print(f"    [ERROR] Engine failure for assertion: {assertion_text}")
+            print(f"            Reason: {repair_result.get('reason', 'Unknown error')}")
+            continue
+
+        repaired_model = repair_result.get("model", "").strip()
+        if not repaired_model:
+            print(f"    [ERROR] Empty repair result for assertion: {assertion_text}")
+            continue
+
+        # 3. UPDATE WORKSPACE: Overwrite the repaired version for the next pass
         with open(out_path, 'w') as f:
             f.write(repaired_model)
             

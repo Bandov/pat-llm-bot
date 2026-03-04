@@ -1,121 +1,53 @@
-#define ATTENDED 1;
-#define NOT_ATTENDED 0;
-#define Class1_Empty (Student1_Class1_Attendance == NOT_ATTENDED && Student2_Class1_Attendance == NOT_ATTENDED && Student3_Class1_Attendance == NOT_ATTENDED);
-#define Class2_Empty (Student1_Class2_Attendance == NOT_ATTENDED && Student2_Class2_Attendance == NOT_ATTENDED && Student3_Class2_Attendance == NOT_ATTENDED);
-#define Class1_assigned (Teacher1_Class1_Teaching == ATTENDED || Teacher2_Class1_Teaching == ATTENDED);
-#define Class2_assigned (Teacher1_Class2_Teaching == ATTENDED || Teacher2_Class2_Teaching == ATTENDED);
-#define Teacher1_assigned (Teacher1_Class1_Teaching == ATTENDED || Teacher1_Class2_Teaching == ATTENDED);
-#define Teacher2_assigned (Teacher2_Class1_Teaching == ATTENDED || Teacher2_Class2_Teaching == ATTENDED);
-#define Student1_assigned (Student1_Class1_Attendance == ATTENDED || Student1_Class2_Attendance == ATTENDED);
-#define Student2_assigned (Student2_Class1_Attendance == ATTENDED || Student2_Class2_Attendance == ATTENDED);
-#define Student3_assigned (Student3_Class1_Attendance == ATTENDED || Student3_Class2_Attendance == ATTENDED);
-#define Student1_attend_Class1 (Student1_Class1_Attendance == ATTENDED);
-#define Class1_Free (Teacher1_Class1_Teaching == NOT_ATTENDED && Teacher2_Class1_Teaching == NOT_ATTENDED);
-#define Class2_Free (Teacher1_Class2_Teaching == NOT_ATTENDED && Teacher2_Class2_Teaching == NOT_ATTENDED);
+#define OK_STATUS 1;
+#define FAIL_STATUS 0;
+#define ANSWER_THRESHOLD 2;
+#define COORDINATOR_ROLE 1;
+#define PROCESSOR_ROLE 2;
+#define NODE1_ID 1;
+#define NODE2_ID 2;
+#define NODE3_ID 3;
 
-var Student1_Class1_Attendance = NOT_ATTENDED;
-var Student1_Class2_Attendance = NOT_ATTENDED;
-var Student2_Class1_Attendance = NOT_ATTENDED;
-var Student2_Class2_Attendance = NOT_ATTENDED;
-var Student3_Class1_Attendance = NOT_ATTENDED;
-var Student3_Class2_Attendance = NOT_ATTENDED;
-var Teacher1_Class1_Teaching = NOT_ATTENDED;
-var Teacher1_Class2_Teaching = NOT_ATTENDED;
-var Teacher2_Class1_Teaching = NOT_ATTENDED;
-var Teacher2_Class2_Teaching = NOT_ATTENDED;
-var turn = 0;
+var coordinatorArray[3] = [1, 1, 1];
+var role = PROCESSOR_ROLE;
+var answerCount = 0;
 
-Student1() = 
-    [turn == 0 && Student1_Class1_Attendance == NOT_ATTENDED && Class1_assigned] Student1_attend_class1{Student1_Class1_Attendance = ATTENDED; turn = 1;} -> Student1()
-    []
-    [turn == 0 && Student1_Class2_Attendance == NOT_ATTENDED && Class2_assigned] Student1_attend_class2{Student1_Class2_Attendance = ATTENDED; turn = 1;} -> Student1()
-    []
-    [turn == 0 && Student1_Class1_Attendance == ATTENDED] Student1_leave_class1{Student1_Class1_Attendance = NOT_ATTENDED; turn = 1;} -> Student1()
-    []
-    [turn == 0 && Student1_Class2_Attendance == ATTENDED] Student1_leave_class2{Student1_Class2_Attendance = NOT_ATTENDED; turn = 1;} -> Student1()
-    []
-    [turn == 0 && Student1_assigned] Student1_stay{turn = 1;} -> Student1()
-    []
-    [turn == 0 && !Student1_assigned && !Class1_assigned && !Class2_assigned] Student1_skip{turn = 1;} -> Student1();
+Node1() = 
+    [role == PROCESSOR_ROLE] send_test_message -> Node1()
+    [] [role == COORDINATOR_ROLE] send_ok_status_message -> Node1()
+    [] [role == COORDINATOR_ROLE] send_fail_status_message -> Node1()
+    [] send_election_message -> Node1()
+    [] send_answer_message -> Node1()
+    [] [role == PROCESSOR_ROLE && answerCount == 0] increment_answer_count_from_0{answerCount = 1;} -> Node1()
+    [] [role == PROCESSOR_ROLE && answerCount == 1] increment_answer_count_from_1{answerCount = 2;} -> Node1()
+    [] [role == PROCESSOR_ROLE && answerCount == 2] promote_to_coordinator{role = COORDINATOR_ROLE; coordinatorArray[0] = NODE1_ID; coordinatorArray[1] = NODE1_ID; coordinatorArray[2] = NODE1_ID;} -> Node1()
+    [] [role == COORDINATOR_ROLE] broadcast_coordinator_message -> Node1()
+    [] receive_coordinator_message_from_NODE2{role = PROCESSOR_ROLE; coordinatorArray[0] = NODE2_ID; coordinatorArray[1] = NODE2_ID; answerCount = 0;} -> Node1()
+    [] receive_coordinator_message_from_NODE3{role = PROCESSOR_ROLE; coordinatorArray[0] = NODE3_ID; coordinatorArray[2] = NODE3_ID; answerCount = 0;} -> Node1();
 
-Student2() = 
-    [turn == 1 && Student2_Class1_Attendance == NOT_ATTENDED && Class1_assigned] Student2_attend_class1{Student2_Class1_Attendance = ATTENDED; turn = 2;} -> Student2()
-    []
-    [turn == 1 && Student2_Class2_Attendance == NOT_ATTENDED && Class2_assigned] Student2_attend_class2{Student2_Class2_Attendance = ATTENDED; turn = 2;} -> Student2()
-    []
-    [turn == 1 && Student2_Class1_Attendance == ATTENDED] Student2_leave_class1{Student2_Class1_Attendance = NOT_ATTENDED; turn = 2;} -> Student2()
-    []
-    [turn == 1 && Student2_Class2_Attendance == ATTENDED] Student2_leave_class2{Student2_Class2_Attendance = NOT_ATTENDED; turn = 2;} -> Student2()
-    []
-    [turn == 1 && Student2_assigned] Student2_stay{turn = 2;} -> Student2()
-    []
-    [turn == 1 && !Student2_assigned && !Class1_assigned && !Class2_assigned] Student2_skip{turn = 2;} -> Student2();
+Node2() = 
+    send_test_message -> Node2()
+    [] send_ok_status_message -> Node2()
+    [] send_fail_status_message -> Node2()
+    [] send_election_message -> Node2()
+    [] send_answer_message -> Node2()
+    [] broadcast_coordinator_message{coordinatorArray[1] = NODE2_ID; coordinatorArray[0] = NODE2_ID;} -> Node2()
+    [] receive_coordinator_message{coordinatorArray[1] = coordinatorArray[0];} -> Node2();
 
-Student3() = 
-    [turn == 2 && Student3_Class1_Attendance == NOT_ATTENDED && Class1_assigned] Student3_attend_class1{Student3_Class1_Attendance = ATTENDED; turn = 3;} -> Student3()
-    []
-    [turn == 2 && Student3_Class2_Attendance == NOT_ATTENDED && Class2_assigned] Student3_attend_class2{Student3_Class2_Attendance = ATTENDED; turn = 3;} -> Student3()
-    []
-    [turn == 2 && Student3_Class1_Attendance == ATTENDED] Student3_leave_class1{Student3_Class1_Attendance = NOT_ATTENDED; turn = 3;} -> Student3()
-    []
-    [turn == 2 && Student3_Class2_Attendance == ATTENDED] Student3_leave_class2{Student3_Class2_Attendance = NOT_ATTENDED; turn = 3;} -> Student3()
-    []
-    [turn == 2 && Student3_assigned] Student3_stay{turn = 3;} -> Student3()
-    []
-    [turn == 2 && !Student3_assigned && !Class1_assigned && !Class2_assigned] Student3_skip{turn = 3;} -> Student3();
+Node3() = 
+    send_test_message -> Node3()
+    [] send_ok_status_message -> Node3()
+    [] send_fail_status_message -> Node3()
+    [] send_election_message -> Node3()
+    [] send_answer_message -> Node3()
+    [] broadcast_coordinator_message{coordinatorArray[2] = NODE3_ID; coordinatorArray[0] = NODE3_ID;} -> Node3()
+    [] receive_coordinator_message{coordinatorArray[2] = coordinatorArray[0];} -> Node3();
 
-Teacher1() = 
-    [turn == 3 && Class1_Free && (!Teacher1_assigned || Teacher2_assigned)] Teacher1_start_teaching_class1{Teacher1_Class1_Teaching = ATTENDED; turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Class2_Free && (!Teacher1_assigned || Teacher2_assigned)] Teacher1_start_teaching_class2{Teacher1_Class2_Teaching = ATTENDED; turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Teacher1_Class1_Teaching == ATTENDED && Class1_Empty] Teacher1_stop_teaching_class1{Teacher1_Class1_Teaching = NOT_ATTENDED; turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Teacher1_Class2_Teaching == ATTENDED && Class2_Empty] Teacher1_stop_teaching_class2{Teacher1_Class2_Teaching = NOT_ATTENDED; turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Teacher1_Class1_Teaching == ATTENDED && Student1_Class1_Attendance == ATTENDED] Teacher1_tutor_S1_C1{turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Teacher1_Class1_Teaching == ATTENDED && Student2_Class1_Attendance == ATTENDED] Teacher1_tutor_S2_C1{turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Teacher1_Class1_Teaching == ATTENDED && Student3_Class1_Attendance == ATTENDED] Teacher1_tutor_S3_C1{turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Teacher1_Class2_Teaching == ATTENDED && Student1_Class2_Attendance == ATTENDED] Teacher1_tutor_S1_C2{turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Teacher1_Class2_Teaching == ATTENDED && Student2_Class2_Attendance == ATTENDED] Teacher1_tutor_S2_C2{turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Teacher1_Class2_Teaching == ATTENDED && Student3_Class2_Attendance == ATTENDED] Teacher1_tutor_S3_C2{turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && Teacher1_assigned] Teacher1_stay{turn = 4;} -> Teacher1()
-    []
-    [turn == 3 && !Teacher1_assigned && !Class1_Free && !Class2_Free] Teacher1_skip{turn = 4;} -> Teacher1();
+Bully() = Node1() ||| Node2() ||| Node3();
 
-Teacher2() = 
-    [turn == 4 && Class1_Free && (!Teacher2_assigned || Teacher1_assigned)] Teacher2_start_teaching_class1{Teacher2_Class1_Teaching = ATTENDED; turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Class2_Free && (!Teacher2_assigned || Teacher1_assigned)] Teacher2_start_teaching_class2{Teacher2_Class2_Teaching = ATTENDED; turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Teacher2_Class1_Teaching == ATTENDED && Class1_Empty] Teacher2_stop_teaching_class1{Teacher2_Class1_Teaching = NOT_ATTENDED; turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Teacher2_Class2_Teaching == ATTENDED && Class2_Empty] Teacher2_stop_teaching_class2{Teacher2_Class2_Teaching = NOT_ATTENDED; turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Teacher2_Class1_Teaching == ATTENDED && Student1_Class1_Attendance == ATTENDED] Teacher2_tutor_S1_C1{turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Teacher2_Class1_Teaching == ATTENDED && Student2_Class1_Attendance == ATTENDED] Teacher2_tutor_S2_C1{turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Teacher2_Class1_Teaching == ATTENDED && Student3_Class1_Attendance == ATTENDED] Teacher2_tutor_S3_C1{turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Teacher2_Class2_Teaching == ATTENDED && Student1_Class2_Attendance == ATTENDED] Teacher2_tutor_S1_C2{turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Teacher2_Class2_Teaching == ATTENDED && Student2_Class2_Attendance == ATTENDED] Teacher2_tutor_S2_C2{turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Teacher2_Class2_Teaching == ATTENDED && Student3_Class2_Attendance == ATTENDED] Teacher2_tutor_S3_C2{turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && Teacher2_assigned] Teacher2_stay{turn = 0;} -> Teacher2()
-    []
-    [turn == 4 && !Teacher2_assigned && !Class1_Free && !Class2_Free] Teacher2_skip{turn = 0;} -> Teacher2();
-
-classroom = Student1() ||| Student2() ||| Student3() ||| Teacher1() ||| Teacher2();
-
-#assert classroom |= []<>Teacher1_assigned;
-#assert classroom |= []<>Student1_assigned;
-#assert classroom |= [](Student1_attend_Class1 -> Class1_assigned);
+#define one_coordinator (coordinatorArray[0] == NODE1_ID || coordinatorArray[0] == NODE2_ID || coordinatorArray[0] == NODE3_ID);
+#define node1_is_coordinator (coordinatorArray[0] == NODE1_ID);
+#define node1_leads_node2 (coordinatorArray[1] == NODE1_ID);
+#define node1_leads_node3 (coordinatorArray[2] == NODE1_ID);
+#assert Bully() |= [](one_coordinator);
+#assert Bully() |= []<>node1_is_coordinator; // INVALID ASSERTION
+#assert Bully() |= [](node1_is_coordinator -> (node1_leads_node2 && node1_leads_node3));
