@@ -7,7 +7,7 @@
 #define NODE2_ID 2;
 #define NODE3_ID 3;
 
-var coordinatorArray[3] = [1, 1, 1];
+var coordinatorArray[3] = [3, 3, 3];
 var role = PROCESSOR_ROLE;
 var answerCount = 0;
 
@@ -30,7 +30,7 @@ Node2() =
     [] send_fail_status_message -> Node2()
     [] send_election_message -> Node2()
     [] send_answer_message -> Node2()
-    [] broadcast_coordinator_message{coordinatorArray[1] = NODE2_ID; coordinatorArray[0] = NODE2_ID;} -> Node2()
+    [] broadcast_coordinator_message{coordinatorArray[1] = NODE2_ID; coordinatorArray[0] = NODE2_ID; role = PROCESSOR_ROLE; answerCount = 0;} -> Node2()
     [] receive_coordinator_message{coordinatorArray[1] = coordinatorArray[0];} -> Node2();
 
 Node3() = 
@@ -39,7 +39,7 @@ Node3() =
     [] send_fail_status_message -> Node3()
     [] send_election_message -> Node3()
     [] send_answer_message -> Node3()
-    [] broadcast_coordinator_message{coordinatorArray[2] = NODE3_ID; coordinatorArray[0] = NODE3_ID;} -> Node3()
+    [] broadcast_coordinator_message{coordinatorArray[2] = NODE3_ID; coordinatorArray[0] = NODE3_ID; role = PROCESSOR_ROLE; answerCount = 0;} -> Node3()
     [] receive_coordinator_message{coordinatorArray[2] = coordinatorArray[0];} -> Node3();
 
 Bully() = Node1() ||| Node2() ||| Node3();
@@ -48,6 +48,7 @@ Bully() = Node1() ||| Node2() ||| Node3();
 #define node1_is_coordinator (coordinatorArray[0] == NODE1_ID);
 #define node1_leads_node2 (coordinatorArray[1] == NODE1_ID);
 #define node1_leads_node3 (coordinatorArray[2] == NODE1_ID);
+
 #assert Bully() |= [](one_coordinator);
 #assert Bully() |= []<>node1_is_coordinator; // INVALID ASSERTION
 #assert Bully() |= [](node1_is_coordinator -> (node1_leads_node2 && node1_leads_node3));
