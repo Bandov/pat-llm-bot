@@ -2,19 +2,19 @@ import os
 import time
 import re
 from dotenv import load_dotenv
-from google import genai
+from openai import OpenAI
 from rules import RULES
 
 load_dotenv()
 
 class RepairEngine:
     def __init__(self):
-        api_key = os.getenv("GEMINI_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("GEMINI_API_KEY missing from .env")
+            raise ValueError("OPENAI_API_KEY missing from .env")
         
-        self.client = genai.Client(api_key=api_key)
-        self.model_id = 'gemini-3-flash-preview'
+        self.client = OpenAI(api_key=api_key)
+        self.model_id = 'gpt-5-2025-08-07'
 
     def _global_sanitizer(self, code):
         """Final structural check to ensure single declarations and clean syntax."""
@@ -75,8 +75,11 @@ class RepairEngine:
 
         try:
             print(f"[*] Calling {self.model_id} for repair...")
-            response = self.client.models.generate_content(model=self.model_id, contents=prompt)
-            output = self._clean_output(response.text)
+            response = self.client.chat.completions.create(
+                model=self.model_id,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            output = self._clean_output(response.choices[0].message.content)
             return self._global_sanitizer(output)
         except Exception as e:
             if "429" in str(e):
