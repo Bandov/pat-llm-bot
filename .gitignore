@@ -1,1 +1,11 @@
 .env
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Specific project files
+mismatch_traces.json
+repaired_models/
+models/
