@@ -1,14 +1,8 @@
 [
   {
-    "assertion": "#assert Bully() |= [](node1_is_coordinator -> (node1_leads_node2 && node1_leads_node3));",
-    "trace": "<init>",
+    "assertion": "#assert Bully() |= []<> node1_is_coordinator;",
+    "trace": "<init -> receive_coordinator_message -> (receive_coordinator_message)*>",
     "current_result": "Invalid",
     "desired_result": "Valid"
-  },
-  {
-    "assertion": "#assert Bully() |= []<>node1_is_coordinator;",
-    "trace": "<init -> receive_coordinator_message_from_NODE2 -> increment_answer_count_from_0 -> increment_answer_count_from_1 -> receive_coordinator_message -> (receive_coordinator_message)*>",
-    "error_type": "Liveness (Starvation)",
-    "description": "When Node1 receives coordinator message from Node2 or Node3, it stops being a coordinator"
   }
 ]

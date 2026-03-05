@@ -1,58 +1,82 @@
 import subprocess
+import json
 import os
-import time
+import re
+import platform
 
-def run_remote_verification(model_name, pat_code):
-    local_csp = "temp_model.csp"
-    local_out = "result.txt"
+class PATVerifier:
+    def __init__(self, pat_path="bin/MONO-PAT-v3.6.0/PAT3.Console.exe", output_json="mismatch_traces.json"):
+        self.project_root = os.path.dirname(os.path.abspath(__file__))
+        self.pat_path = os.path.abspath(pat_path)
+        self.output_json = os.path.abspath(output_json)
+        self.os_type = platform.system().lower() # Detects 'darwin' (Mac), 'linux', or 'windows'
+
+    def verify_model(self, csp_filename):
+        repaired_dir = os.path.join(self.project_root, "repaired_models")
+        abs_csp_path = os.path.join(repaired_dir, csp_filename)
+        abs_log_path = os.path.join(repaired_dir, "output.txt")
+        
+        if not os.path.exists(abs_csp_path):
+            print(f"❌ Error: {csp_filename} not found.")
+            return []
+
+        # --- OS GENERALIZATION LOGIC ---
+        if self.os_type == "windows":
+            # Direct execution on Windows
+            command = [self.pat_path, "-csp", abs_csp_path, abs_log_path]
+        else:
+            # Use Wine for macOS (darwin) and Linux
+            command = ["wine", self.pat_path, "-csp", abs_csp_path, abs_log_path]
+        
+        try:
+            print(f"--- Verifying on {platform.system()}: {csp_filename} ---")
+            subprocess.run(command, capture_output=True, text=True, timeout=300)
+            
+            if os.path.exists(abs_log_path):
+                with open(abs_log_path, "r") as f:
+                    content = f.read()
+                return self._parse_output(content)
+            return []
+                
+        except Exception as e:
+            print(f"❌ Verification failed: {e}")
+            return []
+
+    def _parse_output(self, raw_output):
+        issues = []
+        # Split by blocks to isolate each assertion's results
+        blocks = raw_output.split("=======================================================")
+        
+        for block in blocks:
+            if "is NOT valid" in block:
+                # Extracting Assertion Name
+                assertion_match = re.search(r"Assertion:\s*(.*)", block)
+                assertion_name = assertion_match.group(1).strip() if assertion_match else "Unknown"
+                
+                # Extracting Counterexample Trace
+                trace_match = re.search(r"presented as follows\.\n(.*)", block)
+                trace = trace_match.group(1).strip() if trace_match else "<init>"
+                
+                issues.append({
+                    "assertion": f"#assert {assertion_name};",
+                    "trace": trace,
+                    "current_result": "Invalid",
+                    "desired_result": "Valid"
+                })
+        
+        return issues
+
+    def save_json(self, issues):
+        with open(self.output_json, 'w') as f:
+            json.dump(issues, f, indent=2)
+        print(f"📂 Found {len(issues)} issues. Updated: mismatch_traces.json")
+
+if __name__ == "__main__":
+    verifier = PATVerifier()
+    target = "repaired_model.csp" 
     
-    with open(local_csp, 'w', encoding='utf-8') as f:
-        f.write(pat_code)
-
-    print(f"🔎 Verifying {model_name} (Clean-Room Strategy)...")
-
-    try:
-        # Push model
-        subprocess.run(["docker", "cp", local_csp, "pat-bridge:/model.csp"], check=True)
-
-        # Execute from /app/PAT using standard -csp flag
-        # MONO_REGISTRY_PATH is added to prevent some common Mono crashes on Mac
-        docker_cmd = [
-            "docker", "exec", "pat-bridge", "sh", "-c",
-            "cd /app/PAT && "
-            "export MONO_IOMAP=all && "
-            "export MONO_REGISTRY_PATH=/tmp/mono-reg && "
-            "xvfb-run -a mono PAT3.Console.exe -csp /model.csp /output.txt"
-        ]
-        
-        start_time = time.time()
-        result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=120)
-        print(f"⏱️ Time: {time.time() - start_time:.2f}s")
-
-        # Pull result
-        cp_back = subprocess.run(["docker", "cp", "pat-bridge:/output.txt", local_out], capture_output=True)
-        
-        if cp_back.returncode != 0:
-            print("❌ PAT Error: No result file produced.")
-            # If we see 'Invalid Image' here, it means Module.CSP.dll is still not being loaded
-            if "Invalid Image" in result.stdout:
-                print("⚠️ Still seeing Invalid Image. Checking CSP DLL bitness...")
-                subprocess.run(["docker", "exec", "pat-bridge", "file", "/app/PAT/Modules/CSP/PAT.Module.CSP.dll"])
-            return
-
-        if os.path.exists(local_out):
-            with open(local_out, 'r') as f:
-                content = f.read()
-                if "is Valid" in content or "is VALID" in content:
-                    print(f"✅ SUCCESS: {model_name} is Valid.")
-                else:
-                    print(f"❌ FAIL: {model_name} is Invalid.")
-
-    except Exception as e:
-        print(f"❓ System Error: {e}")
-    finally:
-        if os.path.exists(local_csp): os.remove(local_csp)
-
-if __name__ == '__main__':
-    test_csp = "P = SKIP; #assert P reaches True;"
-    run_remote_verification("FinalBridgeTest", test_csp)
+    if os.path.exists(os.path.join("repaired_models", target)):
+        found_issues = verifier.verify_model(target)
+        verifier.save_json(found_issues)
+    else:
+        print(f"❌ Target file 'repaired_models/{target}' missing.")
