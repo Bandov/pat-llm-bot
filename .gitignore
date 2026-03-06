@@ -1,2 +1,15 @@
 .env
 __pycache__
+
+# Ignore virtual environment folder
+venv/
+.venv/
+
+# Python cache
+*.pyc
+
+# Specific project files
+mismatch_traces.json
+repaired_models/
+models/
+generated_code/
