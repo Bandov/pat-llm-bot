@@ -1,7 +1,13 @@
 [
   {
-    "assertion": "#assert keyless_car() |= []<> start_driving;",
-    "trace": "<init -> owner1_approach -> pickup_key_by_owner1 -> unlock_door_by_owner1 -> open_door -> owner1_enter -> owner0_approach -> key_set_in_car_by_owner1 -> owner1_exit -> owner0_leave -> owner1_leave -> close_door -> lock_door -> owner1_approach -> (owner1_leave -> owner1_approach)*>",
+    "assertion": "#assert classroom() |= []<> Teacher1_assigned;",
+    "trace": "<init -> Teacher2_start_teaching_class2 -> (Teacher2_stop_teaching_class2 -> Teacher2_start_teaching_class2)*>",
+    "current_result": "Invalid",
+    "desired_result": "Valid"
+  },
+  {
+    "assertion": "#assert classroom() |= []<> Student1_assigned;",
+    "trace": "<init -> Teacher2_start_teaching_class2 -> (Teacher2_stop_teaching_class2 -> Teacher2_start_teaching_class2)*>",
     "current_result": "Invalid",
     "desired_result": "Valid"
   }
