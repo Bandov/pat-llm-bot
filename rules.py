@@ -32,5 +32,17 @@ RULES = {
         "1. STARVATION CHECK: Ensure that guards added for Safety do not accidentally "
         "create a deadlock that violates Liveness. Every 'start' must eventually have a 'stop' "
         "path that is reachable."
+    ),
+
+    "generalization_and_overfitting": (
+        "1. NO ASSERTION OVERFITTING: You are strictly forbidden from copying specific variable "
+        "indices (e.g., user '0' or '1') or specific state values directly from #assert properties "
+        "into process guards just to satisfy a mismatch trace.\n"
+        "2. RESOURCE ABSTRACTION: If an assertion dictates that multiple specific events cannot "
+        "occur concurrently (mutual exclusion), enforce this by modeling a shared resource limit "
+        "(e.g., a global 'active_calls' counter), NOT by writing exclusionary logic for specific actors.\n"
+        "3. ACTOR SYMMETRY: Process definitions parameterized by generic variables (like 'caller' "
+        "or 'target') must remain mathematically symmetric. Never evaluate the absolute integer "
+        "value of a generic parameter to restrict flow."
     )
 }
