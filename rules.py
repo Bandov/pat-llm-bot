@@ -35,7 +35,10 @@ RULES = {
     "safety": (
         "1. EXIT GUARD: To fix P -> Q violations, inhibit the Provider from stopping if a "
         "Consumer is active: [Provider_Active && Class_Empty] stop -> ...\n"
-        "2. INVARIANT ALIGNMENT: Ensure guards match the macro definitions exactly."
+        "2. INVARIANT ALIGNMENT: Ensure guards match the macro definitions exactly.\n"
+        "3. IMPLICATION GUARDING: For properties shaped like [] (A -> B), either:\n"
+        "   - gate transitions that make A true so B already holds, or\n"
+        "   - atomically update state so B is established in the same step."
     ),
 
     "liveness": (
@@ -51,11 +54,17 @@ RULES = {
         "   then the TARGET likely assumes fairness that is NOT modeled.\n"
         "   If fixing it would require enforcing a particular scheduling outcome (e.g., forcing a specific branch\n"
         "   to eventually be taken) or adding global fairness constraints, use INVALID_ASSERTION mode.\n"
+        "5. PROGRESS GUARDS: Break stuttering/oscillation SCCs by adding guards that force exit toward unresolved obligations.\n"
+        "6. LOCAL-OBLIGATION-FIRST: If an actor can service pending local work or move away, prioritize local service before movement/phase change.\n"
     ),
 
     "lifecycle_coupling": (
         "1. STARVATION CHECK: Ensure that guards added for Safety do not accidentally "
         "create a deadlock that violates Liveness. Every 'start' must eventually have a 'stop' "
-        "path that is reachable."
+        "path that is reachable.\n"
+        "2. PHASE-DEPENDENCY GATING: For multi-stage workflows, require downstream actions to be enabled only\n"
+        "   after upstream assignment/activation states are reached.\n"
+        "3. CYCLE CLEANUP: On terminal actions of a cycle, reset transient stage flags so the next cycle must\n"
+        "   re-establish prerequisites through the intended dependency chain."
     )
 }
