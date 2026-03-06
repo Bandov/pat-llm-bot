@@ -1,54 +1,114 @@
-#define OK_STATUS 1;
-#define FAIL_STATUS 0;
-#define ANSWER_THRESHOLD 2;
-#define COORDINATOR_ROLE 1;
-#define PROCESSOR_ROLE 2;
-#define NODE1_ID 1;
-#define NODE2_ID 2;
-#define NODE3_ID 3;
+#define OWNER_COUNT 2;
+#define OWNER_POS_IN 0;
+#define OWNER_POS_NEAR 1;
+#define OWNER_POS_FAR 2;
+#define KEY_POS_IN 0;
+#define KEY_POS_FAR 1;
+#define KEY_POS_WITH_OWNER 2;
+#define DOOR_STATUS_OPEN 0;
+#define DOOR_STATUS_UNLOCKED 1;
+#define DOOR_STATUS_LOCKED 2;
+#define ENGINE_OFF 0;
+#define ENGINE_ON 1;
+#define CAR_STOPPED 0;
+#define CAR_DRIVING 1;
+#define FUEL_EMPTY 0;
+#define FUEL_HALF 50;
+#define FUEL_FULL 100;
 
-var coordinatorArray[3] = [3, 3, 3];
-var role = PROCESSOR_ROLE;
-var answerCount = 0;
+var ownerPositions[OWNER_COUNT] = [OWNER_POS_FAR, OWNER_POS_FAR];
+var keyPosition = KEY_POS_FAR;
+var doorStatus = DOOR_STATUS_LOCKED;
+var engineState = ENGINE_OFF;
+var carMotion = CAR_STOPPED;
+var fuelLevel = FUEL_FULL;
 
-Node1() = 
-    [role == PROCESSOR_ROLE] send_test_message -> Node1()
-    [] [role == COORDINATOR_ROLE] send_ok_status_message -> Node1()
-    [] [role == COORDINATOR_ROLE] send_fail_status_message -> Node1()
-    [] send_election_message -> Node1()
-    [] send_answer_message -> Node1()
-    [] [role == PROCESSOR_ROLE && answerCount == 0] increment_answer_count_from_0{answerCount = 1;} -> Node1()
-    [] [role == PROCESSOR_ROLE && answerCount == 1] increment_answer_count_from_1{answerCount = 2;} -> Node1()
-    [] [role == PROCESSOR_ROLE && answerCount == 2] promote_to_coordinator{role = COORDINATOR_ROLE; coordinatorArray[0] = NODE1_ID; coordinatorArray[1] = NODE1_ID; coordinatorArray[2] = NODE1_ID;} -> Node1()
-    [] [role == COORDINATOR_ROLE] broadcast_coordinator_message -> Node1()
-    [] receive_coordinator_message_from_NODE2{role = PROCESSOR_ROLE; coordinatorArray[0] = NODE2_ID; coordinatorArray[1] = NODE2_ID; answerCount = 0;} -> Node1()
-    [] receive_coordinator_message_from_NODE3{role = PROCESSOR_ROLE; coordinatorArray[0] = NODE3_ID; coordinatorArray[2] = NODE3_ID; answerCount = 0;} -> Node1();
+owner_pos() = 
+    [ownerPositions[0] == OWNER_POS_FAR] owner0_approach{ownerPositions[0] = OWNER_POS_NEAR;} -> owner_pos()
+    []
+    [ownerPositions[0] == OWNER_POS_NEAR && doorStatus == DOOR_STATUS_OPEN] owner0_enter{ownerPositions[0] = OWNER_POS_IN;} -> owner_pos()
+    []
+    [ownerPositions[0] == OWNER_POS_IN && doorStatus == DOOR_STATUS_OPEN] owner0_exit{ownerPositions[0] = OWNER_POS_NEAR;} -> owner_pos()
+    []
+    [ownerPositions[0] == OWNER_POS_NEAR] owner0_leave{ownerPositions[0] = OWNER_POS_FAR;} -> owner_pos()
+    []
+    [ownerPositions[1] == OWNER_POS_FAR] owner1_approach{ownerPositions[1] = OWNER_POS_NEAR;} -> owner_pos()
+    []
+    [ownerPositions[1] == OWNER_POS_NEAR && doorStatus == DOOR_STATUS_OPEN] owner1_enter{ownerPositions[1] = OWNER_POS_IN;} -> owner_pos()
+    []
+    [ownerPositions[1] == OWNER_POS_IN && doorStatus == DOOR_STATUS_OPEN] owner1_exit{ownerPositions[1] = OWNER_POS_NEAR;} -> owner_pos()
+    []
+    [ownerPositions[1] == OWNER_POS_NEAR] owner1_leave{ownerPositions[1] = OWNER_POS_FAR;} -> owner_pos();
 
-Node2() = 
-    send_test_message -> Node2()
-    [] send_ok_status_message -> Node2()
-    [] send_fail_status_message -> Node2()
-    [] send_election_message -> Node2()
-    [] send_answer_message -> Node2()
-    [] broadcast_coordinator_message{coordinatorArray[1] = NODE2_ID; coordinatorArray[0] = NODE2_ID; role = PROCESSOR_ROLE; answerCount = 0;} -> Node2()
-    [] receive_coordinator_message{coordinatorArray[1] = coordinatorArray[0];} -> Node2();
+key_pos() = 
+    [keyPosition == KEY_POS_FAR && ownerPositions[0] == OWNER_POS_NEAR] pickup_key_by_owner0{keyPosition = KEY_POS_WITH_OWNER;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_FAR && ownerPositions[1] == OWNER_POS_NEAR] pickup_key_by_owner1{keyPosition = KEY_POS_WITH_OWNER;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_WITH_OWNER && ownerPositions[0] == OWNER_POS_IN] key_set_in_car_by_owner0{keyPosition = KEY_POS_IN;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_WITH_OWNER && ownerPositions[1] == OWNER_POS_IN] key_set_in_car_by_owner1{keyPosition = KEY_POS_IN;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_IN && ownerPositions[0] == OWNER_POS_IN && doorStatus == DOOR_STATUS_OPEN] key_exit_car_by_owner0{keyPosition = KEY_POS_WITH_OWNER;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_IN && ownerPositions[1] == OWNER_POS_IN && doorStatus == DOOR_STATUS_OPEN] key_exit_car_by_owner1{keyPosition = KEY_POS_WITH_OWNER;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_WITH_OWNER && ownerPositions[0] == OWNER_POS_FAR] drop_key_far_by_owner0{keyPosition = KEY_POS_FAR;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_WITH_OWNER && ownerPositions[1] == OWNER_POS_FAR] drop_key_far_by_owner1{keyPosition = KEY_POS_FAR;} -> key_pos();
 
-Node3() = 
-    send_test_message -> Node3()
-    [] send_ok_status_message -> Node3()
-    [] send_fail_status_message -> Node3()
-    [] send_election_message -> Node3()
-    [] send_answer_message -> Node3()
-    [] broadcast_coordinator_message{coordinatorArray[2] = NODE3_ID; coordinatorArray[0] = NODE3_ID; role = PROCESSOR_ROLE; answerCount = 0;} -> Node3()
-    [] receive_coordinator_message{coordinatorArray[2] = coordinatorArray[0];} -> Node3();
+door_op() =
+    [doorStatus == DOOR_STATUS_LOCKED && ownerPositions[0] == OWNER_POS_NEAR && keyPosition == KEY_POS_WITH_OWNER] unlock_door_by_owner0{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_LOCKED && ownerPositions[1] == OWNER_POS_NEAR && keyPosition == KEY_POS_WITH_OWNER] unlock_door_by_owner1{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_LOCKED && ownerPositions[0] == OWNER_POS_IN] unlock_door_from_inside_owner0{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_LOCKED && ownerPositions[1] == OWNER_POS_IN] unlock_door_from_inside_owner1{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_UNLOCKED] open_door{doorStatus = DOOR_STATUS_OPEN;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_OPEN] close_door{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_UNLOCKED && ownerPositions[0] == OWNER_POS_FAR && ownerPositions[1] == OWNER_POS_FAR && keyPosition == KEY_POS_FAR] lock_door{doorStatus = DOOR_STATUS_LOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_UNLOCKED && ownerPositions[0] == OWNER_POS_FAR && ownerPositions[1] == OWNER_POS_FAR && keyPosition == KEY_POS_IN] lock_door{doorStatus = DOOR_STATUS_LOCKED;} -> door_op();
 
-Bully() = Node1() ||| Node2() ||| Node3();
+motor() =
+    [engineState == ENGINE_OFF && ownerPositions[0] == OWNER_POS_IN && (fuelLevel == FUEL_FULL || fuelLevel == FUEL_HALF)] start_engine_by_owner0{engineState = ENGINE_ON;} -> motor()
+    []
+    [engineState == ENGINE_OFF && ownerPositions[1] == OWNER_POS_IN && (fuelLevel == FUEL_FULL || fuelLevel == FUEL_HALF)] start_engine_by_owner1{engineState = ENGINE_ON;} -> motor()
+    []
+    [engineState == ENGINE_ON && carMotion == CAR_STOPPED] stop_engine{engineState = ENGINE_OFF;} -> motor()
+    []
+    [engineState == ENGINE_ON && carMotion == CAR_DRIVING] stop_engine{engineState = ENGINE_OFF;} -> motor()
+    []
+    [engineState == ENGINE_ON && carMotion == CAR_STOPPED && (fuelLevel == FUEL_FULL || fuelLevel == FUEL_HALF)] start_driving{carMotion = CAR_DRIVING;} -> motor()
+    []
+    [engineState == ENGINE_ON && carMotion == CAR_DRIVING] stop_driving{carMotion = CAR_STOPPED;} -> motor()
+    []
+    [carMotion == CAR_DRIVING && fuelLevel == FUEL_FULL] consume_fuel_full_to_half{fuelLevel = FUEL_HALF;} -> motor()
+    []
+    [carMotion == CAR_DRIVING && fuelLevel == FUEL_HALF] consume_fuel_half_to_empty{fuelLevel = FUEL_EMPTY;} -> motor()
+    []
+    [engineState == ENGINE_OFF && carMotion == CAR_STOPPED && fuelLevel == FUEL_EMPTY] refuel_from_empty{fuelLevel = FUEL_FULL;} -> motor()
+    []
+    [engineState == ENGINE_OFF && carMotion == CAR_STOPPED && fuelLevel == FUEL_HALF] refuel_from_half{fuelLevel = FUEL_FULL;} -> motor();
 
-#define one_coordinator (coordinatorArray[0] == NODE1_ID || coordinatorArray[0] == NODE2_ID || coordinatorArray[0] == NODE3_ID);
-#define node1_is_coordinator (coordinatorArray[0] == NODE1_ID);
-#define node1_leads_node2 (coordinatorArray[1] == NODE1_ID);
-#define node1_leads_node3 (coordinatorArray[2] == NODE1_ID);
+keyless_car = (owner_pos() ||| key_pos() ||| door_op() ||| motor());
 
-#assert Bully() |= [](one_coordinator);
-#assert Bully() |= []<>node1_is_coordinator; // INVALID ASSERTION
-#assert Bully() |= [](node1_is_coordinator -> (node1_leads_node2 && node1_leads_node3));
+#define keylockinside (keyPosition == KEY_POS_IN && doorStatus == DOOR_STATUS_LOCKED && ownerPositions[0] != OWNER_POS_IN && ownerPositions[1] != OWNER_POS_IN);
+#define runwithoutowner (carMotion == CAR_DRIVING && ownerPositions[0] == OWNER_POS_FAR && ownerPositions[1] == OWNER_POS_FAR);
+#define ownerdrivetogether (carMotion == CAR_DRIVING && ownerPositions[0] == OWNER_POS_IN && ownerPositions[1] == OWNER_POS_IN);
+#define drivewithoutengineon (carMotion == CAR_DRIVING && engineState == ENGINE_OFF);
+#define drivewithoutfuel (carMotion == CAR_DRIVING && fuelLevel == FUEL_EMPTY);
+#define drivewithoutkeyholdbyother (carMotion == CAR_DRIVING && ownerPositions[1] == OWNER_POS_IN && ownerPositions[0] == OWNER_POS_FAR && keyPosition == KEY_POS_WITH_OWNER);
+
+#assert keyless_car deadlockfree;
+#assert keyless_car |= []<> start_driving;
+#assert keyless_car reaches keylockinside;
+#assert keyless_car reaches runwithoutowner;
+#assert keyless_car reaches ownerdrivetogether;
+#assert keyless_car reaches drivewithoutengineon;
+#assert keyless_car reaches drivewithoutfuel;
+#assert keyless_car reaches drivewithoutkeyholdbyother;

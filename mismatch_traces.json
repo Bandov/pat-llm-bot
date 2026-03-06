@@ -1,7 +1,7 @@
 [
   {
-    "assertion": "#assert Bully() |= []<> node1_is_coordinator;",
-    "trace": "<init -> receive_coordinator_message -> (receive_coordinator_message)*>",
+    "assertion": "#assert keyless_car() |= []<> start_driving;",
+    "trace": "<init -> owner1_approach -> pickup_key_by_owner1 -> unlock_door_by_owner1 -> open_door -> owner1_enter -> owner0_approach -> key_set_in_car_by_owner1 -> owner1_exit -> owner0_leave -> owner1_leave -> close_door -> lock_door -> owner1_approach -> (owner1_leave -> owner1_approach)*>",
     "current_result": "Invalid",
     "desired_result": "Valid"
   }
