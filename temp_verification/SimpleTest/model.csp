@@ -1,5 +1,0 @@
-
-    var x = 0;
-    P = set_x_1 -> SKIP;
-    #assert P reaches x == 1;
-    

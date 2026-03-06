@@ -1,82 +1,101 @@
 import os
 import json
-import shutil
+import time
 from engine import RepairEngine
+from verifier import PATVerifier
 
+# Configuration matching project structure
 MODELS_DIR = "./models"
 OUTPUT_DIR = "./repaired_models"
 LOG_FILE = "mismatch_traces.json"
+MAX_ITERATIONS = 5
 
 def main():
     try:
         engine = RepairEngine()
+        verifier = PATVerifier(output_json=LOG_FILE)
     except Exception as e:
         print(f"[!] Initialization Error: {e}")
         return
     
-    if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    last_model_content = ""
 
-    with open(LOG_FILE, 'r') as f:
-        errors = json.load(f)
+    for iteration in range(1, MAX_ITERATIONS + 1):
+        print(f"\n{'='*20} PIPELINE ITERATION {iteration} {'='*20}")
 
-    # Dictionary to track the 'current best version' of each model
-    # Key: original_filename, Value: path_to_latest_version
-    active_workspace = {}
-
-    print(f"[*] Starting repair pipeline for {len(errors)} failures...")
-
-    for i, entry in enumerate(errors):
-        assertion_text = entry.get('assertion')
-        error_trace = entry.get('trace')
+        # 1. VERIFICATION PHASE
+        repaired_path = os.path.join(OUTPUT_DIR, "repaired_model.csp")
+        original_path = os.path.join(MODELS_DIR, "model.csp")
         
-        # 1. FIND THE FILE: Scan original models AND current repaired workspace
-        target_file = None
-        current_content = ""
-        original_name = ""
-
-        # Check workspace first (to continue from previous fix)
-        for f_name in os.listdir(OUTPUT_DIR):
-            if f_name.endswith(".csp"):
-                with open(os.path.join(OUTPUT_DIR, f_name), 'r') as f:
-                    content = f.read()
-                    if assertion_text in content:
-                        target_file = os.path.join(OUTPUT_DIR, f_name)
-                        current_content = content
-                        original_name = f_name.replace("repaired_", "")
-                        break
+        # Always prioritize the latest repair
+        target_to_verify = repaired_path if os.path.exists(repaired_path) else original_path
         
-        # If not in workspace, check original models
-        if not target_file:
-            for f_name in os.listdir(MODELS_DIR):
-                if f_name.endswith(".csp"):
-                    with open(os.path.join(MODELS_DIR, f_name), 'r') as f:
-                        content = f.read()
-                        if assertion_text in content:
-                            target_file = os.path.join(MODELS_DIR, f_name)
-                            current_content = content
-                            original_name = f_name
-                            break
+        print(f"[*] Verifying current state: {target_to_verify}")
+        all_issues = verifier.verify_model(target_to_verify)
+        verifier.save_json(all_issues)
+        
+        # Filter for fixable errors (skip 'Invalid_Assertion' markers from the LLM)
+        fixable_errors = [e for e in all_issues if e.get('current_result') != "Invalid_Assertion"]
+        
+        if not fixable_errors:
+            print("[🎉] Success! No more issues found. Model is verified.")
+            break
 
-        if not target_file:
-            print(f"[!] Skip: Assertion '{assertion_text}' not found in any file.")
-            continue
+        # 2. LOAD CONTENT & LOOP DETECTION
+        with open(target_to_verify, 'r') as f:
+            current_model_content = f.read()
+
+        # Stop if the model content is unchanged to prevent wasting API quota
+        if current_model_content == last_model_content:
+            print("[⚠️] Loop Detected: Model content is unchanged despite repair attempts.")
+            break
+        last_model_content = current_model_content
+
+        print(f"[*] Found {len(fixable_errors)} issues. Starting Synchronous Repair...")
+
+        # 3. INCREMENTAL REPAIR PHASE
+        for entry in fixable_errors:
+            assertion_text = entry.get('assertion')
+            error_trace = entry.get('trace')
+            status = entry.get('current_result')
             
-        print(f"\n[Step {i+1}] Repairing {original_name} for: {assertion_text}")
+            # Tailor the error log based on whether it is syntax or liveness/safety
+            if status == "Syntax_Error":
+                print(f"\n[*] Engine fixing Syntax Errors...")
+                error_context = f"The model failed to parse. Technical details:\n{error_trace}"
+            else:
+                print(f"\n[*] Engine repairing: {assertion_text[:50]}...")
+                error_context = f"Assertion: {assertion_text}\nTrace: {error_trace}"
 
-        # 2. REPAIR: Pass the LATEST content to the engine
-        repaired_model = engine.request_repair(
-            full_context=current_content,
-            error_log=f"Assertion: {assertion_text}\nTrace: {error_trace}"
-        )
+            # Synchronous call to Gemini
+            repair_result = engine.request_repair(
+                full_context=current_model_content,
+                error_log=error_context,
+                target_assertion=assertion_text,
+                other_assertions=[] 
+            )
 
-        # 3. UPDATE WORKSPACE: Overwrite the repaired version for the next pass
-        out_path = os.path.join(OUTPUT_DIR, f"repaired_{original_name}")
-        with open(out_path, 'w') as f:
-            f.write(repaired_model)
+            # Check status from engine.py ('success' or 'repaired')
+            if repair_result.get("status") in ["success", "repaired"]:
+                new_content = repair_result.get("model", "").strip()
+                
+                if new_content and new_content != current_model_content:
+                    # Save immediately and sync to disk
+                    with open(repaired_path, 'w') as f:
+                        f.write(new_content)
+                    
+                    current_model_content = new_content
+                    print(f"    [SUCCESS] Fix saved to {repaired_path}")
+                    # Small sleep to ensure the filesystem metadata updates
+                    time.sleep(1) 
             
-        print(f"    [SUCCESS] Updated workspace file: {out_path}")
+            elif repair_result.get("status") == "invalid_assertion":
+                print(f"    [SKIP] Engine flagged assertion as invalid.")
+            else:
+                print(f"    [!] Engine failed: {repair_result.get('reason', 'Unknown error')}")
 
-    print("\n[*] Pipeline complete. Check ./repaired_models for the final versions.")
+    print(f"\n[*] Pipeline finished.")
 
 if __name__ == "__main__":
     main()
