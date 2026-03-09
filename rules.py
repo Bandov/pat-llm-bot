@@ -23,19 +23,28 @@ RULES = {
     "invalid_assertion_criteria": (
         "1. ALLOWLIST (WHEN TO FLAG INVALID): You may ONLY use INVALID_ASSERTION if:\n"
         "   - The assertion is mathematically contradictory (e.g., A == 1 && A == 0).\n"
-        "   - The model's core syntax is too broken to parse.\n"
-        "2. BLOCKLIST (WHEN TO REPAIR): You are STRICTLY FORBIDDEN from using INVALID_ASSERTION if:\n"
-        "   - The failure is a Liveness property ([]<>) failing due to an infinite trace.\n"
-        "   - The failure is a Safety property failing due to a RACE CONDITION or OVERWRITTEN STATE. \n"
-        "     You MUST fix this by implementing a Lock/Semaphore or a Status variable."
+        "2. STRICT BLOCKLIST (WHEN TO REPAIR): You are STRICTLY FORBIDDEN from returning INVALID_ASSERTION for:\n"
+        "   - Liveness properties ([]<>) failing due to infinite traces or loops.\n"
+        "   - Safety properties failing due to RACE CONDITIONS, OVERWRITTEN STATES, or poor guard logic.\n"
+        "   - Traces containing unrecognized system logs.\n"
+        "   Instead of calling the model invalid, you MUST apply the relevant repair tactics to fix the code."
+    ),
+    
+    "trace_processing": (
+        "1. NOISE FILTERING: Actively ignore all environment lines containing 'wineboot', 'MoltenVK', \n"
+        "   'mvk-info', or 'Vulkan'. These do NOT indicate a syntax error.\n"
+        "2. SIGNAL IDENTIFICATION: Locate the string '********Verification Result********'. \n"
+        "   - If 'NOT valid' follows, apply Safety/Liveness repair strategies.\n"
+        "   - If this string is missing AND there are no '[Error]' tags, assume the environment failed, not the syntax."
     ),
 
     "safety": (
         "1. PROACTIVE GATING: If A -> B must hold, add [B] as a mandatory guard to the \n"
         "   event that makes A true. \n"
         "2. INVARIANT ALIGNMENT: Ensure guards match the macro definitions exactly.\n"
-        "3. IDENTITY TRACKING: If multiple processes (e.g. Robot1, Robot2) can trigger an event, \n"
-        "   assign an ID variable (e.g. 'var made_by = 0;') to track the specific actor."
+        "3. IDENTITY TRACKING & PERSISTENCE (CRITICAL): Do not define completion or ownership \n"
+        "   based on temporary physical proximity (e.g., Robot_position == Item_position). \n"
+        "   Use dedicated state variables (e.g., var C1_Maker = 1;) assigned exactly when the task finishes."
     ),
 
     "concurrency_locking": (

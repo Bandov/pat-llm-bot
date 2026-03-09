@@ -70,7 +70,7 @@ class RepairEngine:
             raise ValueError("GEMINI_API_KEY missing from .env")
         
         self.client = genai.Client(api_key=api_key)
-        self.model_id = 'gemini-3-flash-preview'
+        self.model_id = 'gemini-2.5-flash'
         self.mandatory_syntax = self._load_external_rules(rules_path)
 
     def _load_external_rules(self, path):
