@@ -15,56 +15,52 @@ RULES = {
         "   - [guard] event{updates;} -> NextProc()\n"
         "   - event -> NextProc()\n"
         "   - event{updates;} -> NextProc()\n"
-        "   FORBIDDEN forms:\n"
-        "   - (event{...}) -> NextProc()\n"
-        "   - ([guard] event{...}) -> NextProc()\n"
-        "   - [cond] ( ...choice... )  (do NOT guard a whole parenthesized choice)\n"
         "7. CHOICE SYNTAX (CRITICAL): Use '[]' between branches. Do NOT put ';' after each branch.\n"
-        "   Only terminate the entire process definition once at the end with a single ';' (if needed).\n"
-        "8. TURN-TAKING RULE: If using a turn variable, put 'turn == k' inside each branch guard,\n"
-        "   e.g. [turn==1 && ...] action{turn=2;} -> Proc(). Do NOT wrap choices in [turn==k](...)."
-        "\n"
-        "9. NON-DESTRUCTIVE EDITS (CRITICAL): You MUST NOT delete, rename, or remove any existing event labels\n"
-        "   or branches from any process. You may only add guards/updates/extra branches.\n"
-        "   If the TARGET assertion cannot be satisfied without deleting/renaming/neutralizing an event branch,\n"
-        "   you MUST use INVALID_ASSERTION mode.\n"
-        "10. NO MACRO INLINING: Do NOT replace macro names with numbers (e.g. keep PROCESSOR_ROLE not '2').\n"
-        "    Keep #define usage consistent with the original.\n"
+        "8. REFACTORING AUTHORITY: You have explicit permission to add new global variables \n"
+        "   and append new conditions to existing guards to solve starvation or race conditions."
+    ),
+
+    "invalid_assertion_criteria": (
+        "1. ALLOWLIST (WHEN TO FLAG INVALID): You may ONLY use INVALID_ASSERTION if:\n"
+        "   - The assertion is mathematically contradictory (e.g., A == 1 && A == 0).\n"
+        "   - The model's core syntax is too broken to parse.\n"
+        "2. BLOCKLIST (WHEN TO REPAIR): You are STRICTLY FORBIDDEN from using INVALID_ASSERTION if:\n"
+        "   - The failure is a Liveness property ([]<>) failing due to an infinite trace.\n"
+        "   - The failure is a Safety property failing due to a RACE CONDITION or OVERWRITTEN STATE. \n"
+        "     You MUST fix this by implementing a Lock/Semaphore or a Status variable."
     ),
 
     "safety": (
-        "1. EXIT GUARD: To fix P -> Q violations, inhibit the Provider from stopping if a "
-        "Consumer is active: [Provider_Active && Class_Empty] stop -> ...\n"
+        "1. PROACTIVE GATING: If A -> B must hold, add [B] as a mandatory guard to the \n"
+        "   event that makes A true. \n"
         "2. INVARIANT ALIGNMENT: Ensure guards match the macro definitions exactly.\n"
-        "3. IMPLICATION GUARDING: For properties shaped like [] (A -> B), either:\n"
-        "   - gate transitions that make A true so B already holds, or\n"
-        "   - atomically update state so B is established in the same step."
+        "3. IDENTITY TRACKING: If multiple processes (e.g. Robot1, Robot2) can trigger an event, \n"
+        "   assign an ID variable (e.g. 'var made_by = 0;') to track the specific actor."
+    ),
+
+    "concurrency_locking": (
+        "1. MUTEX PATTERN: To prevent race conditions in interleaved (|||) processes, \n"
+        "   inject a boolean lock (e.g., 'var task_locked = false;').\n"
+        "   - Guard the 'start' event with '&& !task_locked'.\n"
+        "   - Update the 'start' event with '{task_locked = true;}'.\n"
+        "   - Update the 'finish' event with '{task_locked = false;}'.\n"
+        "2. STATE ENUMERATION: Replace binary flags with status variables (0: IDLE, 1: BUSY, 2: DONE) \n"
+        "   to ensure processes do not overwrite progress."
     ),
 
     "liveness": (
-        "1. STUTTERING PREVENTION: If the trace shows a process repeating the same two events "
-        "without progress (e.g., start -> stop -> start), add a 'Progress Guard'.\n"
-        "2. FAIRNESS (ANTI-HOGGING): If one process prevents others from acting, add a "
-        "turn-taking variable or a guard that forces the process to yield after an action.\n"
-        "   - Example: var turn = 1; ... [turn == 1] action{turn = 2;} -> Proc()\n"
-        "3. LIVENESS COMPLETION: For []<>Goal, ensure every cycle in the state graph contains "
-        "the 'Goal' event or a state where the 'Goal' condition is true."
-        "4. STARVATION VALIDITY CHECK (GENERAL): If the failure is Liveness (Starvation) or SCC/cycle-based,\n"
-        "   and the counterexample shows an infinite repetition '(e)*' or a loop that avoids the goal,\n"
-        "   then the TARGET likely assumes fairness that is NOT modeled.\n"
-        "   If fixing it would require enforcing a particular scheduling outcome (e.g., forcing a specific branch\n"
-        "   to eventually be taken) or adding global fairness constraints, use INVALID_ASSERTION mode.\n"
-        "5. PROGRESS GUARDS: Break stuttering/oscillation SCCs by adding guards that force exit toward unresolved obligations.\n"
-        "6. LOCAL-OBLIGATION-FIRST: If an actor can service pending local work or move away, prioritize local service before movement/phase change.\n"
+        "1. FAIRNESS INJECTION TEMPLATE (MANDATORY): To fix starvation in interleaved processes,\n"
+        "   you MUST inject a scheduler. \n"
+        "   - Add 'var turn = 0;' at the top of the file.\n"
+        "   - Append '&& turn == 0' to Process A's guards, and add '{turn = 1;}' to its updates.\n"
+        "   - Append '&& turn == 1' to Process B's guards, and add '{turn = 0;}' to its updates.\n"
+        "2. LOOP BREAKING: Use progress counters or turn variables to force states to exit loops."
     ),
 
     "lifecycle_coupling": (
-        "1. STARVATION CHECK: Ensure that guards added for Safety do not accidentally "
-        "create a deadlock that violates Liveness. Every 'start' must eventually have a 'stop' "
-        "path that is reachable.\n"
-        "2. PHASE-DEPENDENCY GATING: For multi-stage workflows, require downstream actions to be enabled only\n"
-        "   after upstream assignment/activation states are reached.\n"
-        "3. CYCLE CLEANUP: On terminal actions of a cycle, reset transient stage flags so the next cycle must\n"
-        "   re-establish prerequisites through the intended dependency chain."
+        "1. STARVATION CHECK: Ensure safety guards do not create deadlocks. If a deadlock occurs,\n"
+        "   add a 'reset' branch or a higher-priority event to unblock the system.\n"
+        "2. PHASE-DEPENDENCY GATING: Require downstream actions (e.g. Product) to enable only \n"
+        "   after upstream states (e.g. Component_ismade) are finalized."
     )
 }

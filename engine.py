@@ -1,32 +1,79 @@
-import os
-import time
-import re
+import json, re, os, time
 from dotenv import load_dotenv
 from google import genai
 from rules import RULES 
 
 load_dotenv()
 
+class ProjectAnalyzer:
+    def __init__(self, json_path):
+        with open(json_path, 'r') as f:
+            self.errors = json.load(f)
+
+    def get_repair_targets(self, entry, full_csp_content):
+        """
+        Dynamically finds all blocks that touch variables mentioned 
+        in the failed assertion by expanding macros.
+        """
+        assertion = entry.get('assertion', '')
+        
+        # 1. Improved Macro extraction
+        macros = re.findall(r'#define\s+(\w+)\s+\((.*?)\);', full_csp_content)
+        macro_map = {name: logic for name, logic in macros}
+
+        # 2. Expand macros in the assertion
+        expanded_assertion = assertion
+        for name, logic in macro_map.items():
+            expanded_assertion = expanded_assertion.replace(name, logic)
+
+        # 3. Identify all actual variables
+        potential_vars = set(re.findall(r'\b([a-z][a-zA-Z0-9_]*)\b', expanded_assertion))
+        blacklist = {'assert', 'if', 'else', 'true', 'false', 'var', 'one_coordinator'}
+        vars_involved = {v for v in potential_vars if v not in blacklist}
+        
+        # 4. Find ALL events modifying these variables
+        found_events = ["init"] 
+        for var in vars_involved:
+            pattern = rf"(\w+)\s*\{{[^}}]*?{var}(?:\[.*?\])?\s*=[^}}]*?\}}"
+            matches = re.findall(pattern, full_csp_content)
+            for m in matches:
+                if m not in found_events:
+                    found_events.append(m)
+        
+        return found_events
+
+def find_process_block(csp_content, event_name):
+    """
+    Surgically extracts the target code block (Init block or Process transition).
+    """
+    if event_name.lower() == "init":
+        pattern = r"((?:var\s+[\s\S]*?;)+)"
+        match = re.search(pattern, csp_content)
+        return match.group(0) if match else None
+
+    pattern = rf"(\[.*?\]\s*)?{event_name}\s*\{{.*?\}}"
+    match = re.search(pattern, csp_content)
+    if match:
+        return match.group(0)
+    
+    pattern_fallback = rf"{event_name}\s*\{{.*?\}}"
+    match = re.search(pattern_fallback, csp_content)
+    return match.group(0) if match else None
+
+
 class RepairEngine:
     INVALID_PREFIX = "INVALID_ASSERTION:"
 
     def __init__(self, rules_path="pat_rules.md"):
-        """
-        Initializes the Repair Engine.
-        :param rules_path: Path to the Markdown file containing mandatory PAT syntax.
-        """
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY missing from .env")
         
         self.client = genai.Client(api_key=api_key)
         self.model_id = 'gemini-3-flash-preview'
-        
-        # Load external syntax constraints to keep engine.py clean
         self.mandatory_syntax = self._load_external_rules(rules_path)
 
     def _load_external_rules(self, path):
-        """Reads the markdown file containing PAT syntax constraints."""
         try:
             if os.path.exists(path):
                 with open(path, 'r') as f:
@@ -38,13 +85,7 @@ class RepairEngine:
             return ""
 
     def _global_sanitizer(self, code):
-        """
-        Final structural check to ensure single declarations and clean syntax.
-        Enforces flat array initialization and semicolon rules.
-        """
-        # 1. Brute-force fix for 2D array nesting: [[0,1]] -> [0,1]
         code = re.sub(r'=\s*\[\s*\[(.*?)\]\s*\]', r'= [\1]', code) 
-        
         lines = code.split('\n')
         seen_headers = set()
         clean_lines = []
@@ -55,7 +96,6 @@ class RepairEngine:
                 clean_lines.append("")
                 continue
 
-            # 2. Deduplicate: var, #define, or Process() =
             header_match = re.match(r'^(var\s+\w+|#define\s+\w+|\w+\(\)\s*=)', stripped)
             if header_match:
                 header = header_match.group(1)
@@ -63,11 +103,9 @@ class RepairEngine:
                     continue 
                 seen_headers.add(header)
             
-            # 3. Strip 'atomic' keyword (Common PAT parser error fix)
             line = re.sub(r'\{atomic\s*\{(.*?)\}\s*\}', r'{\1}', line)
             line = line.replace("atomic{", "{")
             
-            # [cite_start]4. Ensure #define/var declarations end with a semicolon [cite: 1]
             if stripped.startswith(("#define", "var")) and not stripped.endswith(";"):
                 line = stripped + ";"
             
@@ -78,17 +116,8 @@ class RepairEngine:
     def request_repair(self, full_context, error_log, target_assertion="", other_assertions=None):
         """Main entry point to request a model repair from Gemini."""
         
-        # Determine strategy based on the error log (Starvation/Liveness check)
-        if self._looks_like_starvation_liveness(target_assertion, error_log):
-            tagged = self._tag_invalid_assertion(full_context, target_assertion)
-            return {
-                "status": "invalid_assertion",
-                "model": tagged,
-                "reason": "Liveness failure is starvation/cycle-based; property assumes fairness not encoded in the model."
-            }
-
         is_liveness = "[]<>" in error_log or "SCC" in error_log
-        strategy_list = [RULES["default"]]
+        strategy_list = [RULES["default"], RULES["invalid_assertion_criteria"]]
         other_assertions = other_assertions or []
         
         if is_liveness:
@@ -99,7 +128,6 @@ class RepairEngine:
 
         preserve_assertions_block = "\n".join(other_assertions) if other_assertions else "(none)"
 
-        # The prompt now references the mandatory syntax loaded from your .md file
         prompt = f"""
         Role: Formal Methods Expert (PAT CSP#).
         Task: Fix the Liveness/Safety failure in the FULL model below.
@@ -127,7 +155,6 @@ class RepairEngine:
 
         try:
             print(f"[*] Calling {self.model_id} for repair...")
-            # Inject mandatory syntax into the system_instruction for strict compliance
             response = self.client.models.generate_content(
                 model=self.model_id, 
                 contents=prompt,
@@ -138,7 +165,6 @@ class RepairEngine:
             output = self._clean_output(parsed["content"])
             sanitized = self._global_sanitizer(output)
 
-            # Handle Invalid Assertion mode
             if parsed["status"] == "invalid_assertion":
                 base_model = sanitized if sanitized else full_context
                 tagged = self._tag_invalid_assertion(base_model, target_assertion)
@@ -148,8 +174,8 @@ class RepairEngine:
                     "reason": parsed.get("reason") or "No reason provided."
                 }
 
-            # Regression check for destructive repairs
-            if self._too_destructive(full_context, sanitized):
+            # RELAXED destructiveness check (drop_ratio bumped to 0.50)
+            if self._too_destructive(full_context, sanitized, drop_ratio=0.50):
                 tagged = self._tag_invalid_assertion(full_context, target_assertion)
                 return {
                     "status": "invalid_assertion",
@@ -180,10 +206,6 @@ class RepairEngine:
 
         return {"status": "repaired", "model": "", "reason": None, "content": stripped}
 
-    def _looks_like_starvation_liveness(self, target_assertion, error_log):
-        if "[]<>" not in target_assertion: return False
-        return "Starvation" in error_log or "SCC" in error_log or re.search(r'\)\s*\*', error_log)
-
     def _clean_output(self, text):
         match = re.search(r'(#define|var|[\w]+\(\)\s*=)', text)
         return text[match.start():] if match else text
@@ -213,7 +235,7 @@ class RepairEngine:
             if m: names.add(m.group(1))
         return names
 
-    def _too_destructive(self, original, repaired, drop_ratio=0.15):
+    def _too_destructive(self, original, repaired, drop_ratio=0.50):
         orig = self._extract_event_labels(original)
         rep = self._extract_event_labels(repaired)
         if not orig: return False

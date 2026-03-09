@@ -1,93 +1,95 @@
-#define ATTENDED 1;
-#define NOT_ATTENDED 0;
-#define MAX_TEACHERS_PER_CLASS 1;
+#define NUM_COMPONENTS 2;
+#define NO_ASSEMBLY 0;
+#define COMPONENT1_ID 1;
+#define COMPONENT2_ID 2;
+#define PRODUCT_ID 3;
 
-var Student1_Class1_Attendance = NOT_ATTENDED;
-var Student1_Class2_Attendance = NOT_ATTENDED;
-var Student2_Class1_Attendance = NOT_ATTENDED;
-var Student2_Class2_Attendance = NOT_ATTENDED;
-var Student3_Class1_Attendance = NOT_ATTENDED;
-var Student3_Class2_Attendance = NOT_ATTENDED;
-var Teacher1_Class1_Teaching = NOT_ATTENDED;
-var Teacher1_Class2_Teaching = NOT_ATTENDED;
-var Teacher2_Class1_Teaching = NOT_ATTENDED;
-var Teacher2_Class2_Teaching = NOT_ATTENDED;
+var Component1_position = 0;
+var Component2_position = 0;
+var Product_position = 0;
+var Robot1_position = 0;
+var Robot1_assemblingItem = NO_ASSEMBLY;
+var Robot2_position = 0;
+var Robot2_assemblingItem = NO_ASSEMBLY;
 
-Student1() = 
-    [Student1_Class1_Attendance == NOT_ATTENDED] Student1_attend_class1{Student1_Class1_Attendance = ATTENDED;} -> Student1()
+Component1() = 
+    [Robot1_assemblingItem == COMPONENT1_ID] assemble_component1_Robot1{Component1_position = Robot1_position;} -> Component1()
     []
-    [Student1_Class1_Attendance == ATTENDED] Student1_leave_class1{Student1_Class1_Attendance = NOT_ATTENDED;} -> Student1()
-    []
-    [Student1_Class2_Attendance == NOT_ATTENDED] Student1_attend_class2{Student1_Class2_Attendance = ATTENDED;} -> Student1()
-    []
-    [Student1_Class2_Attendance == ATTENDED] Student1_leave_class2{Student1_Class2_Attendance = NOT_ATTENDED;} -> Student1();
+    [Robot2_assemblingItem == COMPONENT1_ID] assemble_component1_Robot2{Component1_position = Robot2_position;} -> Component1();
 
-Student2() = 
-    [Student2_Class1_Attendance == NOT_ATTENDED] Student2_attend_class1{Student2_Class1_Attendance = ATTENDED;} -> Student2()
+Component2() = 
+    [Robot1_assemblingItem == COMPONENT2_ID] assemble_component2_Robot1{Component2_position = Robot1_position;} -> Component2()
     []
-    [Student2_Class1_Attendance == ATTENDED] Student2_leave_class1{Student2_Class1_Attendance = NOT_ATTENDED;} -> Student2()
-    []
-    [Student2_Class2_Attendance == NOT_ATTENDED] Student2_attend_class2{Student2_Class2_Attendance = ATTENDED;} -> Student2()
-    []
-    [Student2_Class2_Attendance == ATTENDED] Student2_leave_class2{Student2_Class2_Attendance = NOT_ATTENDED;} -> Student2();
+    [Robot2_assemblingItem == COMPONENT2_ID] assemble_component2_Robot2{Component2_position = Robot2_position;} -> Component2();
 
-Student3() = 
-    [Student3_Class1_Attendance == NOT_ATTENDED] Student3_attend_class1{Student3_Class1_Attendance = ATTENDED;} -> Student3()
+Product() = 
+    [Robot1_assemblingItem == PRODUCT_ID && Component1_position >= 1 && Component1_position <= 2 && Component2_position >= 1 && Component2_position <= 2] 
+    assemble_product_Robot1{Product_position = Robot1_position;} -> Product()
     []
-    [Student3_Class1_Attendance == ATTENDED] Student3_leave_class1{Student3_Class1_Attendance = NOT_ATTENDED;} -> Student3()
-    []
-    [Student3_Class2_Attendance == NOT_ATTENDED] Student3_attend_class2{Student3_Class2_Attendance = ATTENDED;} -> Student3()
-    []
-    [Student3_Class2_Attendance == ATTENDED] Student3_leave_class2{Student3_Class2_Attendance = NOT_ATTENDED;} -> Student3();
+    [Robot2_assemblingItem == PRODUCT_ID && Component1_position >= 1 && Component1_position <= 2 && Component2_position >= 1 && Component2_position <= 2] 
+    assemble_product_Robot2{Product_position = Robot2_position;} -> Product();
 
-Teacher1() = 
-    [Teacher1_Class1_Teaching == NOT_ATTENDED && Teacher2_Class1_Teaching == NOT_ATTENDED] Teacher1_start_teaching_class1{Teacher1_Class1_Teaching = ATTENDED;} -> Teacher1()
+Robot1() = 
+    move_Robot1_to_0{Robot1_position = 0;} -> Robot1()
     []
-    [Teacher1_Class1_Teaching == ATTENDED] Teacher1_stop_teaching_class1{Teacher1_Class1_Teaching = NOT_ATTENDED;} -> Teacher1()
+    move_Robot1_to_1{Robot1_position = 1;} -> Robot1()
     []
-    [Teacher1_Class2_Teaching == NOT_ATTENDED && Teacher2_Class2_Teaching == NOT_ATTENDED] Teacher1_start_teaching_class2{Teacher1_Class2_Teaching = ATTENDED;} -> Teacher1()
+    move_Robot1_to_2{Robot1_position = 2;} -> Robot1()
     []
-    [Teacher1_Class2_Teaching == ATTENDED] Teacher1_stop_teaching_class2{Teacher1_Class2_Teaching = NOT_ATTENDED;} -> Teacher1()
+    [Robot1_assemblingItem == NO_ASSEMBLY] 
+    start_assembly_component1_Robot1{Robot1_assemblingItem = COMPONENT1_ID;} -> Robot1()
     []
-    [Teacher1_Class1_Teaching == ATTENDED && Student1_Class1_Attendance == ATTENDED] Teacher1_tutor_Student1_class1 -> Teacher1()
+    [Robot1_assemblingItem == NO_ASSEMBLY] 
+    start_assembly_component2_Robot1{Robot1_assemblingItem = COMPONENT2_ID;} -> Robot1()
     []
-    [Teacher1_Class1_Teaching == ATTENDED && Student2_Class1_Attendance == ATTENDED] Teacher1_tutor_Student2_class1 -> Teacher1()
+    [Robot1_assemblingItem == NO_ASSEMBLY && Component1_position >= 1 && Component1_position <= 2 && Component2_position >= 1 && Component2_position <= 2] 
+    start_assembly_product_Robot1{Robot1_assemblingItem = PRODUCT_ID;} -> Robot1()
     []
-    [Teacher1_Class1_Teaching == ATTENDED && Student3_Class1_Attendance == ATTENDED] Teacher1_tutor_Student3_class1 -> Teacher1()
+    [Robot1_assemblingItem == COMPONENT1_ID] 
+    finish_assembly_component1_Robot1{Component1_position = Robot1_position; Robot1_assemblingItem = NO_ASSEMBLY;} -> Robot1()
     []
-    [Teacher1_Class2_Teaching == ATTENDED && Student1_Class2_Attendance == ATTENDED] Teacher1_tutor_Student1_class2 -> Teacher1()
+    [Robot1_assemblingItem == COMPONENT2_ID] 
+    finish_assembly_component2_Robot1{Component2_position = Robot1_position; Robot1_assemblingItem = NO_ASSEMBLY;} -> Robot1()
     []
-    [Teacher1_Class2_Teaching == ATTENDED && Student2_Class2_Attendance == ATTENDED] Teacher1_tutor_Student2_class2 -> Teacher1()
-    []
-    [Teacher1_Class2_Teaching == ATTENDED && Student3_Class2_Attendance == ATTENDED] Teacher1_tutor_Student3_class2 -> Teacher1();
+    [Robot1_assemblingItem == PRODUCT_ID && Component1_position >= 1 && Component1_position <= 2 && Component2_position >= 1 && Component2_position <= 2] 
+    finish_assembly_product_Robot1{Product_position = Robot1_position; Robot1_assemblingItem = NO_ASSEMBLY;} -> Robot1();
 
-Teacher2() = 
-    [Teacher2_Class1_Teaching == NOT_ATTENDED && Teacher1_Class1_Teaching == NOT_ATTENDED] Teacher2_start_teaching_class1{Teacher2_Class1_Teaching = ATTENDED;} -> Teacher2()
+Robot2() = 
+    move_Robot2_to_0{Robot2_position = 0;} -> Robot2()
     []
-    [Teacher2_Class1_Teaching == ATTENDED] Teacher2_stop_teaching_class1{Teacher2_Class1_Teaching = NOT_ATTENDED;} -> Teacher2()
+    move_Robot2_to_1{Robot2_position = 1;} -> Robot2()
     []
-    [Teacher2_Class2_Teaching == NOT_ATTENDED && Teacher1_Class2_Teaching == NOT_ATTENDED] Teacher2_start_teaching_class2{Teacher2_Class2_Teaching = ATTENDED;} -> Teacher2()
+    move_Robot2_to_2{Robot2_position = 2;} -> Robot2()
     []
-    [Teacher2_Class2_Teaching == ATTENDED] Teacher2_stop_teaching_class2{Teacher2_Class2_Teaching = NOT_ATTENDED;} -> Teacher2()
+    [Robot2_assemblingItem == NO_ASSEMBLY] 
+    start_assembly_component1_Robot2{Robot2_assemblingItem = COMPONENT1_ID;} -> Robot2()
     []
-    [Teacher2_Class1_Teaching == ATTENDED && Student1_Class1_Attendance == ATTENDED] Teacher2_tutor_Student1_class1 -> Teacher2()
+    [Robot2_assemblingItem == NO_ASSEMBLY] 
+    start_assembly_component2_Robot2{Robot2_assemblingItem = COMPONENT2_ID;} -> Robot2()
     []
-    [Teacher2_Class1_Teaching == ATTENDED && Student2_Class1_Attendance == ATTENDED] Teacher2_tutor_Student2_class1 -> Teacher2()
+    [Robot2_assemblingItem == NO_ASSEMBLY && Component1_position >= 1 && Component1_position <= 2 && Component2_position >= 1 && Component2_position <= 2] 
+    start_assembly_product_Robot2{Robot2_assemblingItem = PRODUCT_ID;} -> Robot2()
     []
-    [Teacher2_Class1_Teaching == ATTENDED && Student3_Class1_Attendance == ATTENDED] Teacher2_tutor_Student3_class1 -> Teacher2()
+    [Robot2_assemblingItem == COMPONENT1_ID] 
+    finish_assembly_component1_Robot2{Component1_position = Robot2_position; Robot2_assemblingItem = NO_ASSEMBLY;} -> Robot2()
     []
-    [Teacher2_Class2_Teaching == ATTENDED && Student1_Class2_Attendance == ATTENDED] Teacher2_tutor_Student1_class2 -> Teacher2()
+    [Robot2_assemblingItem == COMPONENT2_ID] 
+    finish_assembly_component2_Robot2{Component2_position = Robot2_position; Robot2_assemblingItem = NO_ASSEMBLY;} -> Robot2()
     []
-    [Teacher2_Class2_Teaching == ATTENDED && Student2_Class2_Attendance == ATTENDED] Teacher2_tutor_Student2_class2 -> Teacher2()
-    []
-    [Teacher2_Class2_Teaching == ATTENDED && Student3_Class2_Attendance == ATTENDED] Teacher2_tutor_Student3_class2 -> Teacher2();
+    [Robot2_assemblingItem == PRODUCT_ID && Component1_position >= 1 && Component1_position <= 2 && Component2_position >= 1 && Component2_position <= 2] 
+    finish_assembly_product_Robot2{Product_position = Robot2_position; Robot2_assemblingItem = NO_ASSEMBLY;} -> Robot2();
 
-classroom = Student1() ||| Student2() ||| Student3() ||| Teacher1() ||| Teacher2();
+production_line = Component1() ||| Component2() ||| Product() ||| Robot1() ||| Robot2();
 
-#define Teacher1_assigned (Teacher1_Class1_Teaching == ATTENDED || Teacher1_Class2_Teaching == ATTENDED);
-#define Student1_assigned (Student1_Class1_Attendance == ATTENDED || Student1_Class2_Attendance == ATTENDED);
-#define Class1_assigned (Teacher1_Class1_Teaching == ATTENDED || Teacher2_Class1_Teaching == ATTENDED);
-#define Student1_attend_Class1 (Student1_Class1_Attendance == ATTENDED);
-#assert classroom |= []<>Teacher1_assigned;
-#assert classroom |= []<>Student1_assigned;
-#assert classroom |= [](Student1_attend_Class1 -> Class1_assigned);
+#define Component1_ismade (Component1_position != 0);
+#define Component1_madeby_robot (Component1_position == Robot1_position || Component1_position == Robot2_position);
+#define Component2_ismade (Component2_position != 0);
+#define Component2_madeby_robot (Component2_position == Robot1_position || Component2_position == Robot2_position);
+#define Product_ismade (Product_position != 0);
+#define Product_madeby_robot (Product_position == Robot1_position || Product_position == Robot2_position);
+#define Component1_before_Product (Component1_position != 0);
+#define Component2_before_Product (Component2_position != 0);
+#assert production_line |= [](Component1_ismade -> Component1_madeby_robot);
+#assert production_line |= [](Component2_ismade -> Component2_madeby_robot);
+#assert production_line |= [](Product_ismade -> Product_madeby_robot);
+#assert production_line |= [](Product_ismade -> (Component1_before_Product && Component2_before_Product));
