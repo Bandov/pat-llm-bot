@@ -78,6 +78,14 @@ RULES = {
         "   to ensure processes do not overwrite progress."
     ),
 
+    "resource_management": (
+        "1. ATOMIC RESOURCE CLAIMING: When an actor (e.g., Train) moves to a shared resource, \n"
+        "   it MUST update the availability flag (e.g., signal = RED) in the SAME event update block '{...}'.\n"
+        "2. MONITOR ANTI-PATTERN REMOVAL: Do NOT use separate asynchronous processes (e.g., Track()) \n"
+        "   to monitor physical positions and update locks. Delete these monitor processes and merge \n"
+        "   the lock/signal updates directly into the actor's transition."
+    ),
+
     "liveness": (
         "1. FAIRNESS INJECTION TEMPLATE (MANDATORY): To fix starvation in interleaved processes,\n"
         "   you MUST inject a scheduler. \n"

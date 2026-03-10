@@ -8,7 +8,7 @@ from verifier import PATVerifier
 MODELS_DIR = "./models"
 OUTPUT_DIR = "./repaired_models"
 LOG_FILE = "mismatch_traces.json"
-MAX_ITERATIONS = 2
+MAX_ITERATIONS = 5
 
 def main():
     try:
