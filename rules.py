@@ -18,8 +18,7 @@ RULES = {
         "7. CHOICE SYNTAX (CRITICAL): Use '[]' between branches. Do NOT put ';' after each branch.\n"
         "   Only terminate the entire process definition once at the end with a single ';' (if needed).\n"
         "8. TURN-TAKING RULE: If using a turn variable, put 'turn == k' inside each branch guard,\n"
-        "   e.g. [turn==1 && ...] action{turn=2;} -> Proc(). Do NOT wrap choices in [turn==k](...)."
-        "\n"
+        "   e.g. [turn==1 && ...] action{turn=2;} -> Proc(). Do NOT wrap choices in [turn==k](...).\n"
         "9. ASSERTION PRESERVATION (ABSOLUTE): You are STRICTLY FORBIDDEN from deleting, modifying, "
         "   or commenting out any '#assert' lines, '#define' macros used in assertions, or initial "
         "   state variable declarations. The test criteria must remain exactly as provided.\n"
@@ -66,6 +65,8 @@ RULES = {
         "6. IDENTITY TRACKING & PERSISTENCE (CRITICAL): Do not define completion or ownership \n"
         "   based on temporary physical proximity (e.g., Robot_position == Item_position). \n"
         "   Use dedicated state variables (e.g., var C1_Maker = 1;) assigned exactly when the task finishes."
+        "7. INITIALIZATION ALIGNMENT: Global variables MUST be initialized to states that \n"
+        "   satisfy all global invariants (e.g., if []At_most_one_green, do not start with two greens)."
     ),
 
     "concurrency_locking": (
@@ -78,12 +79,13 @@ RULES = {
         "   to ensure processes do not overwrite progress."
     ),
 
-    "resource_management": (
-        "1. ATOMIC RESOURCE CLAIMING: When an actor (e.g., Train) moves to a shared resource, \n"
-        "   it MUST update the availability flag (e.g., signal = RED) in the SAME event update block '{...}'.\n"
-        "2. MONITOR ANTI-PATTERN REMOVAL: Do NOT use separate asynchronous processes (e.g., Track()) \n"
-        "   to monitor physical positions and update locks. Delete these monitor processes and merge \n"
-        "   the lock/signal updates directly into the actor's transition."
+    "psl_phase_dependency": (
+        "1. PHASE-TRANSITION COMPLETENESS: If an actor moves from Phase A to Phase B to achieve a goal, "
+        "   ensure the 'Phase Change' event is guarded by the successful completion of Phase A.\n"
+        "2. COMPLEMENTARY CHANNEL LOGIC: In distributed models, if Node A sends a message, "
+        "   the receiving Node B MUST have a corresponding branch to consume that state change.\n"
+        "3. HANDSHAKE INTEGRITY: For every 'request' event, there MUST be both a 'grant' and a 'deny' "
+        "   path to prevent an actor from being permanently stuck in a REQUESTING state."
     ),
 
     "liveness": (
@@ -92,8 +94,7 @@ RULES = {
         "   - Add 'var turn = 0;' at the top of the file.\n"
         "   - Append '&& turn == 0' to Process A's guards, and add '{turn = 1;}' to its updates.\n"
         "   - Append '&& turn == 1' to Process B's guards, and add '{turn = 0;}' to its updates.\n"
-        "   in explanation, if one process prevents others from acting, add a "
-            "turn-taking variable or a guard that forces the process to yield after an action.\n"
+        "   If one process prevents others from acting, add a turn-taking variable or a guard that forces yielding.\n"
         "2. LOOP BREAKING: Use progress counters or turn variables to force states to exit loops."
         "3. LIVENESS COMPLETION: For []<>Goal, ensure every cycle in the state graph contains "
         "   the 'Goal' event or a state where the 'Goal' condition is true.\n"
@@ -111,6 +112,14 @@ RULES = {
         "   without progress (e.g., start -> stop -> start), add a 'Progress Guard'.\n"
     ),
 
+    "resource_management": (
+        "1. ATOMIC RESOURCE CLAIMING: When an actor (e.g., Train) moves to a shared resource, \n"
+        "   it MUST update the availability flag (e.g., signal = RED) in the SAME event update block '{...}'.\n"
+        "2. MONITOR ANTI-PATTERN REMOVAL: Do NOT use separate asynchronous processes (e.g., Track()) \n"
+        "   to monitor physical positions and update locks. Delete these monitor processes and merge \n"
+        "   the lock/signal updates directly into the actor's transition."
+    ),
+
     "lifecycle_coupling": (
         "1. STARVATION CHECK: Ensure safety guards do not create deadlocks (that violates liveness, for example).  Every 'start' must eventually have a 'stop' path. \n"
         "   If a deadlock occurs, add a 'reset' branch or a higher-priority event to unblock the system.\n"
@@ -123,7 +132,7 @@ RULES = {
         "   controller's transition to release them."
     ),
     
-    "generalization_and_overfitting": ( # first implemented by telecom
+    "generalization_and_overfitting": (
         "1. NO ASSERTION OVERFITTING (ABSOLUTE): You are strictly forbidden from hardcoding "
         "specific actor IDs, variable indices (e.g., 'caller == 0', 'handsetStates[2]'), or "
         "state values directly from #assert properties into process guards just to satisfy a "
@@ -137,8 +146,8 @@ RULES = {
         "   mathematically symmetric. Never evaluate the absolute integer value of a generic parameter."
     ),
 
-    "architecture_preservation": ( # first implemented by telecom
-        "1. PROCESS FRAGMENTATION BAN (ABSOLUTE): You MUST NOT artificially split a single "
+    "architecture_preservation": (
+        "1. PROCESS FRAGMENTATION BAN (ABSOLUTE): You MUST NOT split a single "
         "controller process into multiple sub-processes (e.g., creating Proc_Ringing, Proc_Engaged). "
         "You MUST use a single unified process with comprehensive guards (e.g., [lineState == BUSY]) "
         "to handle all phases. Fragmentation creates blind spots that cause deadlocks.\n"
