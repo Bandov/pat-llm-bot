@@ -1,83 +1,109 @@
-#define STATION_ENTRY 0;
-#define STATION_TRACK1 1;
-#define STATION_TRACK2 2;
-#define STATION_EXIT 3;
-#define SIGNAL_GREEN 0;
-#define SIGNAL_RED 1;
+#define OWNER_COUNT 2;
+#define OWNER_POS_IN 0;
+#define OWNER_POS_NEAR 1;
+#define OWNER_POS_FAR 2;
+#define KEY_POS_IN 0;
+#define KEY_POS_FAR 1;
+#define KEY_POS_WITH_OWNER 2;
+#define DOOR_STATUS_OPEN 0;
+#define DOOR_STATUS_UNLOCKED 1;
+#define DOOR_STATUS_LOCKED 2;
+#define ENGINE_OFF 0;
+#define ENGINE_ON 1;
+#define CAR_STOPPED 0;
+#define CAR_DRIVING 1;
+#define FUEL_EMPTY 0;
+#define FUEL_HALF 50;
+#define FUEL_FULL 100;
 
-var Track1_signal = SIGNAL_GREEN;
-var Track2_signal = SIGNAL_GREEN;
-var Train1_position = STATION_ENTRY;
-var Train2_position = STATION_ENTRY;
+var ownerPositions[OWNER_COUNT] = [OWNER_POS_FAR, OWNER_POS_FAR];
+var keyPosition = KEY_POS_FAR;
+var doorStatus = DOOR_STATUS_LOCKED;
+var engineState = ENGINE_OFF;
+var carMotion = CAR_STOPPED;
+var fuelLevel = FUEL_FULL;
 
-Track1() = 
-        [(Train1_position == STATION_ENTRY || Train1_position == STATION_TRACK1 || Train1_position == STATION_TRACK2) && 
-        (Train2_position == STATION_ENTRY || Train2_position == STATION_TRACK1 || Train2_position == STATION_TRACK2) && 
-        Track1_signal == SIGNAL_RED] 
-        Track1_set_green{Track1_signal = SIGNAL_GREEN;} -> Track1()
-        [] 
-        [Train1_position == STATION_EXIT && Track1_signal == SIGNAL_GREEN] 
-        Track1_set_red_train1{Track1_signal = SIGNAL_RED;} -> Track1()
-        [] 
-        [Train2_position == STATION_EXIT && Track1_signal == SIGNAL_GREEN] 
-        Track1_set_red_train2{Track1_signal = SIGNAL_RED;} -> Track1();
+owner_pos() = 
+    [ownerPositions[0] == OWNER_POS_FAR] owner0_approach{ownerPositions[0] = OWNER_POS_NEAR;} -> owner_pos()
+    []
+    [ownerPositions[0] == OWNER_POS_NEAR && doorStatus == DOOR_STATUS_OPEN] owner0_enter{ownerPositions[0] = OWNER_POS_IN;} -> owner_pos()
+    []
+    [ownerPositions[0] == OWNER_POS_IN && doorStatus == DOOR_STATUS_OPEN] owner0_exit{ownerPositions[0] = OWNER_POS_NEAR;} -> owner_pos()
+    []
+    [ownerPositions[0] == OWNER_POS_NEAR] owner0_leave{ownerPositions[0] = OWNER_POS_FAR;} -> owner_pos()
+    []
+    [ownerPositions[1] == OWNER_POS_FAR] owner1_approach{ownerPositions[1] = OWNER_POS_NEAR;} -> owner_pos()
+    []
+    [ownerPositions[1] == OWNER_POS_NEAR && doorStatus == DOOR_STATUS_OPEN] owner1_enter{ownerPositions[1] = OWNER_POS_IN;} -> owner_pos()
+    []
+    [ownerPositions[1] == OWNER_POS_IN && doorStatus == DOOR_STATUS_OPEN] owner1_exit{ownerPositions[1] = OWNER_POS_NEAR;} -> owner_pos()
+    []
+    [ownerPositions[1] == OWNER_POS_NEAR] owner1_leave{ownerPositions[1] = OWNER_POS_FAR;} -> owner_pos();
 
-Track2() = 
-        [(Train1_position == STATION_ENTRY || Train1_position == STATION_TRACK1 || Train1_position == STATION_TRACK2) && 
-        (Train2_position == STATION_ENTRY || Train2_position == STATION_TRACK1 || Train2_position == STATION_TRACK2) && 
-        Track2_signal == SIGNAL_RED] 
-        Track2_set_green{Track2_signal = SIGNAL_GREEN;} -> Track2()
-        [] 
-        [Train1_position == STATION_EXIT && Track2_signal == SIGNAL_GREEN] 
-        Track2_set_red_train1{Track2_signal = SIGNAL_RED;} -> Track2()
-        [] 
-        [Train2_position == STATION_EXIT && Track2_signal == SIGNAL_GREEN] 
-        Track2_set_red_train2{Track2_signal = SIGNAL_RED;} -> Track2();
+key_pos() = 
+    [keyPosition == KEY_POS_FAR && ownerPositions[0] == OWNER_POS_NEAR] pickup_key_by_owner0{keyPosition = KEY_POS_WITH_OWNER;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_FAR && ownerPositions[1] == OWNER_POS_NEAR] pickup_key_by_owner1{keyPosition = KEY_POS_WITH_OWNER;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_WITH_OWNER && ownerPositions[0] == OWNER_POS_IN] key_set_in_car_by_owner0{keyPosition = KEY_POS_IN;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_WITH_OWNER && ownerPositions[1] == OWNER_POS_IN] key_set_in_car_by_owner1{keyPosition = KEY_POS_IN;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_IN && ownerPositions[0] == OWNER_POS_IN && doorStatus == DOOR_STATUS_OPEN] key_exit_car_by_owner0{keyPosition = KEY_POS_WITH_OWNER;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_IN && ownerPositions[1] == OWNER_POS_IN && doorStatus == DOOR_STATUS_OPEN] key_exit_car_by_owner1{keyPosition = KEY_POS_WITH_OWNER;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_WITH_OWNER && ownerPositions[0] == OWNER_POS_FAR] drop_key_far_by_owner0{keyPosition = KEY_POS_FAR;} -> key_pos()
+    []
+    [keyPosition == KEY_POS_WITH_OWNER && ownerPositions[1] == OWNER_POS_FAR] drop_key_far_by_owner1{keyPosition = KEY_POS_FAR;} -> key_pos();
 
-Train1() = 
-        [Train1_position == STATION_ENTRY && Track1_signal == SIGNAL_GREEN && 
-        (Train2_position == STATION_ENTRY || Train2_position == STATION_TRACK2 || Train2_position == STATION_EXIT)] 
-        Train1_move_entry_to_track1{Train1_position = STATION_TRACK1;} -> Train1()
-        [] 
-        [Train1_position == STATION_ENTRY && Track2_signal == SIGNAL_GREEN && 
-        (Train2_position == STATION_ENTRY || Train2_position == STATION_TRACK1 || Train2_position == STATION_EXIT)] 
-        Train1_move_entry_to_track2{Train1_position = STATION_TRACK2;} -> Train1()
-        [] 
-        [Train1_position == STATION_TRACK1 && Track1_signal == SIGNAL_GREEN && 
-        (Train2_position == STATION_ENTRY || Train2_position == STATION_TRACK1 || Train2_position == STATION_TRACK2)] 
-        Train1_move_track1_to_exit{Train1_position = STATION_EXIT;} -> Train1()
-        [] 
-        [Train1_position == STATION_TRACK2 && Track2_signal == SIGNAL_GREEN && 
-        (Train2_position == STATION_ENTRY || Train2_position == STATION_TRACK1 || Train2_position == STATION_TRACK2)] 
-        Train1_move_track2_to_exit{Train1_position = STATION_EXIT;} -> Train1();
+door_op() =
+    [doorStatus == DOOR_STATUS_LOCKED && ownerPositions[0] == OWNER_POS_NEAR && keyPosition == KEY_POS_WITH_OWNER] unlock_door_by_owner0{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_LOCKED && ownerPositions[1] == OWNER_POS_NEAR && keyPosition == KEY_POS_WITH_OWNER] unlock_door_by_owner1{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_LOCKED && ownerPositions[0] == OWNER_POS_IN] unlock_door_from_inside_owner0{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_LOCKED && ownerPositions[1] == OWNER_POS_IN] unlock_door_from_inside_owner1{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_UNLOCKED] open_door{doorStatus = DOOR_STATUS_OPEN;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_OPEN] close_door{doorStatus = DOOR_STATUS_UNLOCKED;} -> door_op()
+    []
+    [doorStatus == DOOR_STATUS_UNLOCKED && ownerPositions[0] == OWNER_POS_FAR && ownerPositions[1] == OWNER_POS_FAR && keyPosition == KEY_POS_FAR] lock_door{doorStatus = DOOR_STATUS_LOCKED;} -> door_op();
 
-Train2() = 
-        [Train2_position == STATION_ENTRY && Track1_signal == SIGNAL_GREEN && 
-        (Train1_position == STATION_ENTRY || Train1_position == STATION_TRACK2 || Train1_position == STATION_EXIT)] 
-        Train2_move_entry_to_track1{Train2_position = STATION_TRACK1;} -> Train2()
-        [] 
-        [Train2_position == STATION_ENTRY && Track2_signal == SIGNAL_GREEN && 
-        (Train1_position == STATION_ENTRY || Train1_position == STATION_TRACK1 || Train1_position == STATION_EXIT)] 
-        Train2_move_entry_to_track2{Train2_position = STATION_TRACK2;} -> Train2()
-        [] 
-        [Train2_position == STATION_TRACK1 && Track1_signal == SIGNAL_GREEN && 
-        (Train1_position == STATION_ENTRY || Train1_position == STATION_TRACK1 || Train1_position == STATION_TRACK2)] 
-        Train2_move_track1_to_exit{Train2_position = STATION_EXIT;} -> Train2()
-        [] 
-        [Train2_position == STATION_TRACK2 && Track2_signal == SIGNAL_GREEN && 
-        (Train1_position == STATION_ENTRY || Train1_position == STATION_TRACK1 || Train1_position == STATION_TRACK2)] 
-        Train2_move_track2_to_exit{Train2_position = STATION_EXIT;} -> Train2();
+motor() =
+    [engineState == ENGINE_OFF && ownerPositions[0] == OWNER_POS_IN && (fuelLevel == FUEL_FULL || fuelLevel == FUEL_HALF)] start_engine_by_owner0{engineState = ENGINE_ON;} -> motor()
+    []
+    [engineState == ENGINE_OFF && ownerPositions[1] == OWNER_POS_IN && (fuelLevel == FUEL_FULL || fuelLevel == FUEL_HALF)] start_engine_by_owner1{engineState = ENGINE_ON;} -> motor()
+    []
+    [engineState == ENGINE_ON && carMotion == CAR_STOPPED] stop_engine{engineState = ENGINE_OFF;} -> motor()
+    []
+    [engineState == ENGINE_ON && carMotion == CAR_STOPPED && (fuelLevel == FUEL_FULL || fuelLevel == FUEL_HALF)] start_driving{carMotion = CAR_DRIVING;} -> motor()
+    []
+    [engineState == ENGINE_ON && carMotion == CAR_DRIVING] stop_driving{carMotion = CAR_STOPPED;} -> motor()
+    []
+    [carMotion == CAR_DRIVING && fuelLevel == FUEL_FULL] consume_fuel_full_to_half{fuelLevel = FUEL_HALF;} -> motor()
+    []
+    [carMotion == CAR_DRIVING && fuelLevel == FUEL_HALF] consume_fuel_half_to_empty{fuelLevel = FUEL_EMPTY;} -> motor()
+    []
+    [engineState == ENGINE_OFF && carMotion == CAR_STOPPED && fuelLevel == FUEL_EMPTY] refuel_from_empty{fuelLevel = FUEL_FULL;} -> motor()
+    []
+    [engineState == ENGINE_OFF && carMotion == CAR_STOPPED && fuelLevel == FUEL_HALF] refuel_from_half{fuelLevel = FUEL_FULL;} -> motor();
 
-railwaysys = Track1() ||| Track2() ||| Train1() ||| Train2();
+keyless_car = (owner_pos() ||| key_pos() ||| door_op() ||| motor());
 
-#define Track1_green (Track1_signal == SIGNAL_GREEN);
-#define Track2_green (Track2_signal == SIGNAL_GREEN);
-#define Collision (Train1_position == Train2_position);
-#define Train1_at_Track1 (Train1_position == STATION_TRACK1);
-#define Train1_at_Exit (Train1_position == STATION_EXIT);
-#define At_most_one_green (!((Track1_signal == SIGNAL_GREEN) && (Track2_signal == SIGNAL_GREEN)));
-#assert railwaysys |= <>Track1_green;
-#assert railwaysys |= <>Track2_green;
-#assert railwaysys |= [](!Collision);
-#assert railwaysys |= [](Train1_at_Track1 -> (!Track1_green -> [](!Train1_at_Exit)));
-#assert railwaysys |= []At_most_one_green;
+#define keylockinside (keyPosition == KEY_POS_IN && doorStatus == DOOR_STATUS_LOCKED && ownerPositions[0] != OWNER_POS_IN && ownerPositions[1] != OWNER_POS_IN);
+#define runwithoutowner (carMotion == CAR_DRIVING && ownerPositions[0] == OWNER_POS_FAR && ownerPositions[1] == OWNER_POS_FAR);
+#define ownerdrivetogether (carMotion == CAR_DRIVING && ownerPositions[0] == OWNER_POS_IN && ownerPositions[1] == OWNER_POS_IN);
+#define drivewithoutengineon (carMotion == CAR_DRIVING && engineState == ENGINE_OFF);
+#define drivewithoutfuel (carMotion == CAR_DRIVING && fuelLevel == FUEL_EMPTY);
+#define drivewithoutkeyholdbyother (carMotion == CAR_DRIVING && ownerPositions[1] == OWNER_POS_IN && ownerPositions[0] == OWNER_POS_FAR && keyPosition == KEY_POS_WITH_OWNER);
+#assert keyless_car deadlockfree;
+#assert keyless_car |= []<> start_driving;
+#assert keyless_car reaches keylockinside;
+#assert keyless_car reaches runwithoutowner;
+#assert keyless_car reaches ownerdrivetogether;
+#assert keyless_car reaches drivewithoutengineon;
+#assert keyless_car reaches drivewithoutfuel;
+#assert keyless_car reaches drivewithoutkeyholdbyother;

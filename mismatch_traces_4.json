@@ -1,0 +1,8 @@
+[
+  {
+    "assertion": "#assert keyless_car() |= []<> start_driving;",
+    "trace": "<init -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> motor_idle -> (motor_idle)*>",
+    "current_result": "Invalid",
+    "desired_result": "Valid"
+  }
+]

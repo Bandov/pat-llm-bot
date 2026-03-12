@@ -70,7 +70,7 @@ class RepairEngine:
             raise ValueError("GEMINI_API_KEY missing from .env")
         
         self.client = genai.Client(api_key=api_key)
-        self.model_id = 'gemini-2.5-flash'
+        self.model_id = 'gemini-3-flash-preview'
         self.mandatory_syntax = self._load_external_rules(rules_path)
 
     def _load_external_rules(self, path):
@@ -199,8 +199,10 @@ class RepairEngine:
         lines = stripped.splitlines()
         first_line = lines[0].strip()
 
-        if first_line.startswith(self.INVALID_PREFIX):
-            reason = first_line.split(self.INVALID_PREFIX, 1)[1].strip()
+        # Catch INVALID_ASSERTION even if it's jumbled on the first line
+        if "INVALID_ASSERTION" in first_line:
+            reason = first_line.replace("INVALID_ASSERTION", "").replace(":", "").strip()
+            # Drop the contaminated first line entirely so it doesn't pollute the code
             content = "\n".join(lines[1:]).strip()
             return {"status": "invalid_assertion", "model": "", "reason": reason, "content": content}
 
@@ -213,8 +215,15 @@ class RepairEngine:
     def _tag_invalid_assertion(self, model_text, target_assertion):
         if not model_text or not target_assertion: return model_text
         target = target_assertion.strip()
-        if target in model_text and "// INVALID ASSERTION" not in model_text:
-            return model_text.replace(target, target + " // INVALID ASSERTION", 1)
+        
+        # 1. Clean up any raw text the LLM might have injected directly in the body
+        model_text = re.sub(r'INVALID_ASSERTION\s*' + re.escape(target), target, model_text)
+        
+        # 2. Safely comment out the entire assertion so it's structurally sound
+        if target in model_text:
+            replacement = f"// {target} // FLAGGED INVALID BY ENGINE"
+            return model_text.replace(target, replacement, 1)
+            
         return model_text
 
     def _extract_event_labels(self, code):
