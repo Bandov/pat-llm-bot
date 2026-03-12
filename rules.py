@@ -116,6 +116,14 @@ RULES = {
         "   -> leave -> approach) without ever triggering the goal, you MUST break the loop. You are AUTHORIZED "
         "   to restrict the 'leave' or 'abort' branches by adding phase guards or counters so that once an "
         "   actor commits to a sequence, they are forced to progress toward the liveness goal."
+        "9. FORCED PROGRESSION (STUTTERING FIX): If a liveness trace shows an actor "
+        "   repeatedly performing reversible actions (e.g., approach -> leave) or "
+        "   idling (e.g., motor_idle -> motor_pass) without reaching the Goal, "
+        "   you MUST inject a 'Commitment Guard.' \n"
+        "   - Create a 'progress' variable (e.g., var goal_reached = false;). \n"
+        "   - Once a critical step is taken (e.g., owner enters car), set it to true. \n"
+        "   - Use this variable to disable 'reversal' events (like owner_leave or motor_idle) "
+        "     so the system is forced to move toward the terminal Goal."
     ),
 
     "resource_management": (
