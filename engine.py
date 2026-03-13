@@ -70,7 +70,7 @@ class RepairEngine:
             raise ValueError("GEMINI_API_KEY missing from .env")
         
         self.client = genai.Client(api_key=api_key)
-        self.model_id = 'gemini-3-flash-preview'
+        self.model_id = 'gemini-2.5-flash'
         self.mandatory_syntax = self._load_external_rules(rules_path)
 
     def _load_external_rules(self, path):
@@ -113,35 +113,87 @@ class RepairEngine:
             
         return '\n'.join(clean_lines)
 
-    def request_repair(self, full_context, error_log, target_assertion="", other_assertions=None):
+    def request_repair(self, full_context, error_log, target_assertion="", other_assertions=None, desired_result="Valid"):
         """Main entry point to request a model repair from Gemini."""
         
+        # Detect if we are in a Syntax Error loop
+        is_syntax_error = target_assertion in ["SYNTAX_CHECK", "PARSING", "EXECUTION"] or "failed to parse" in error_log
         is_liveness = "[]<>" in error_log or "SCC" in error_log
-        strategy_list = [RULES["default"], RULES["invalid_assertion_criteria"]]
-        other_assertions = other_assertions or []
         
-        if is_liveness:
-            strategy_list.append(RULES["liveness"])
-        else:
-            strategy_list.append(RULES["safety"])
-            strategy_list.append(RULES["lifecycle_coupling"])
-
+        # Load the foundational rules that apply to EVERY model
+        strategy_list = [
+            "### CORE SYNTAX & INITIALIZATION ###\n" + RULES["default"]
+        ]
+        
+        other_assertions = other_assertions or []
         preserve_assertions_block = "\n".join(other_assertions) if other_assertions else "(none)"
+        
+        # --- NEW LOGIC: SYNTAX OVERRIDE ---
+        # --- NEW LOGIC: SYNTAX OVERRIDE ---
+        if is_syntax_error:
+            strategy_list.append(
+                "### SYNTAX REPAIR STRATEGY (CRITICAL) ###\n"
+                "1. DO NOT change the logical architecture of the model.\n"
+                "2. Review the error trace strictly to find the line number and missing token.\n"
+                "3. Fix missing semicolons (;) after 'var' and '#define' declarations.\n"
+                "4. Fix PAT prefix syntax (ensure '[]' is used for choice, and no semicolons separate branches).\n"
+                "5. Ensure variables are updated inside curly braces like {var = val;}."
+            )
+            task_directive = (
+                f"CRITICAL TASK: The model has a SYNTAX ERROR and failed to compile.\n"
+                f"Your EXCLUSIVE goal is to fix the formatting and structural compilation errors described in the trace.\n"
+                f"*** YOU MUST STRICTLY FOLLOW ALL SYNTAX RULES DEFINED IN YOUR SYSTEM INSTRUCTIONS (pat_rules.md). ***\n"
+                f"Do NOT attempt to fix safety or liveness properties during this pass. ONLY fix the syntax."
+            )
+        else:
+            # Only load the deep architectural rules if the model actually compiled
+            strategy_list.extend([
+                "### TARGET RESULT ALIGNMENT ###\n" + RULES.get("desired_result_alignment", ""),
+                "### INVALIDATION CRITERIA ###\n" + RULES.get("invalid_assertion_criteria", ""),
+                "### ARCHITECTURE & SYMMETRY ###\n" + RULES.get("architecture_preservation", ""),
+                "### ANTI-OVERFITTING ###\n" + RULES.get("generalization_and_overfitting", ""),
+                "### RESOURCE MANAGEMENT ###\n" + RULES.get("resource_management", ""),
+                "### CROSS-PROCESS MUTEX ###\n" + RULES.get("cross_process_interlocking", ""),
+                "### PHASE DEPENDENCY ###\n" + RULES.get("psl_phase_dependency", ""),
+                "### CONCURRENCY ###\n" + RULES.get("concurrency_locking", "")
+            ])
+            
+            if is_liveness:
+                strategy_list.append("### LIVENESS FIXES ###\n" + RULES.get("liveness", ""))
+            else:
+                strategy_list.append("### SAFETY FIXES ###\n" + RULES.get("safety", ""))
+                strategy_list.append("### LIFECYCLE COUPLING ###\n" + RULES.get("lifecycle_coupling", ""))
+
+            # DYNAMIC TASK DIRECTIVE based on the desired result
+            if str(desired_result).lower() == "invalid":
+                task_directive = (
+                    f"CRITICAL TASK: The target assertion ({target_assertion}) MUST FAIL. \n"
+                    f"Your goal is to INTENTIONALLY EXPOSE A FLAW (e.g., allow starvation, deadlock, or race conditions) "
+                    f"so that this specific assertion evaluates to INVALID. Do NOT use fairness injections here."
+                )
+            else:
+                task_directive = (
+                    f"CRITICAL TASK: The target assertion ({target_assertion}) MUST PASS. \n"
+                    f"Your goal is to FIX the model so this assertion evaluates to VALID."
+                )
+
+        formatted_strategies = "\n\n".join(strategy_list)
 
         prompt = f"""
         Role: Formal Methods Expert (PAT CSP#).
-        Task: Fix the Liveness/Safety failure in the FULL model below.
+        {task_directive}
         
         [STRATEGY]
-        {" ".join(strategy_list)}
+        {formatted_strategies}
 
-        [TARGET ASSERTION TO FIX]
+        [TARGET ASSERTION]
         {target_assertion}
+        REQUIRED FINAL RESULT: {str(desired_result).upper()}
 
-        [REGRESSION GUARD]
+        [REGRESSION GUARD (DO NOT BREAK THESE)]
         {preserve_assertions_block}
         
-        [VERIFICATION FAILURE]
+        [VERIFICATION FAILURE TRACE]
         {error_log}
         
         [ORIGINAL MODEL]
@@ -154,7 +206,7 @@ class RepairEngine:
         """
 
         try:
-            print(f"[*] Calling {self.model_id} for repair...")
+            print(f"[*] Calling {self.model_id} (Target: {str(desired_result).upper()})...")
             response = self.client.models.generate_content(
                 model=self.model_id, 
                 contents=prompt,
@@ -174,7 +226,6 @@ class RepairEngine:
                     "reason": parsed.get("reason") or "No reason provided."
                 }
 
-            # RELAXED destructiveness check (drop_ratio bumped to 0.50)
             if self._too_destructive(full_context, sanitized, drop_ratio=0.50):
                 tagged = self._tag_invalid_assertion(full_context, target_assertion)
                 return {
@@ -188,9 +239,9 @@ class RepairEngine:
         except Exception as e:
             if "429" in str(e):
                 print("[!] Quota hit. Waiting 60s..."); time.sleep(60)
-                return self.request_repair(full_context, error_log, target_assertion, other_assertions)
+                return self.request_repair(full_context, error_log, target_assertion, other_assertions, desired_result)
             return {"status": "error", "model": "", "reason": str(e)}
-
+        
     def _parse_response(self, text):
         stripped = text.replace("```csp", "").replace("```", "").strip()
         if not stripped:

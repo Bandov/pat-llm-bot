@@ -1,8 +1,0 @@
-[
-  {
-    "assertion": "#assert keyless_car() |= []<> start_driving;",
-    "trace": "<init -> owner1_approach -> pickup_key -> unlock_door -> motor_idle -> owner1_leave -> drop_key -> lock_door -> motor_idle -> owner1_approach -> pickup_key -> unlock_door -> motor_idle -> owner1_leave -> drop_key -> lock_door -> motor_idle -> owner1_approach -> pickup_key -> unlock_door -> motor_idle -> owner1_leave -> drop_key -> lock_door -> motor_idle -> owner1_approach -> pickup_key -> unlock_door -> motor_pass -> owner_pass -> key_pass -> open_door -> motor_pass -> owner1_enter -> key_set_in_car_by_owner1 -> door_pass -> motor_pass -> owner0_approach -> key_pass -> door_pass -> motor_pass -> owner0_enter -> key_pass -> door_pass -> start_engine -> owner_pass -> (key_pass -> door_pass -> motor_pass -> owner_pass)*>",
-    "current_result": "Invalid",
-    "desired_result": "Valid"
-  }
-]

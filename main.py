@@ -158,8 +158,10 @@ def main():
                 if str(desired).lower() == "invalid" and str(status).lower() == "valid":
                     error_context = (
                         f"Assertion: {assertion_text}\n"
-                        f"Goal: This assertion evaluates to VALID, but it MUST evaluate to INVALID.\n"
-                        f"Failure: A path to an illegal state exists. You must modify the model to PREVENT the following trace:\n"
+                        f"Goal: This assertion currently evaluates to VALID, but it MUST evaluate to INVALID.\n"
+                        f"Failure: Because it is currently Valid, it means EVERY possible mathematical path eventually triggers this property. "
+                        f"The system is structurally biased or too fair. You MUST introduce a valid path (an infinite loop or a deadlock) "
+                        f"where this property is NEVER triggered. Ensure mathematical symmetry so competing processes can infinitely starve each other from the very first step.\n"
                         f"Trace: {error_trace}"
                     )
                 elif str(desired).lower() == "valid" and str(status).lower() == "invalid":
@@ -176,7 +178,8 @@ def main():
                 full_context=current_model_content, 
                 error_log=error_context,
                 target_assertion=assertion_text,
-                other_assertions=[] 
+                other_assertions=[],
+                desired_result=desired  # <--- FIXED: Now explicitly passing desired result to engine.py
             )
 
             if repair_result.get("status") in ["success", "repaired"]:

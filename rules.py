@@ -15,19 +15,38 @@ RULES = {
         "   - [guard] event{updates;} -> NextProc()\n"
         "   - event -> NextProc()\n"
         "   - event{updates;} -> NextProc()\n"
-        "7. CHOICE SYNTAX (CRITICAL): Use '[]' between branches. Do NOT put ';' after each branch.\n"
+        "7. EMPTY BRACES BAN (ABSOLUTE): You are STRICTLY FORBIDDEN from generating empty curly braces '{}'. "
+        "   If an event has no state updates, you MUST completely omit the braces (e.g., write 'event -> Proc()', "
+        "   NEVER 'event{} -> Proc()'). Writing 'event{}' will cause a fatal syntax parsing error.\n"
+        "8. CHOICE SYNTAX (CRITICAL): Use '[]' between branches. Do NOT put ';' after each branch.\n"
         "   Only terminate the entire process definition once at the end with a single ';' (if needed).\n"
-        "8. TURN-TAKING RULE: If using a turn variable, put 'turn == k' inside each branch guard,\n"
+        "9. TURN-TAKING RULE: If using a turn variable, put 'turn == k' inside each branch guard,\n"
         "   e.g. [turn==1 && ...] action{turn=2;} -> Proc(). Do NOT wrap choices in [turn==k](...).\n"
-        "9. ASSERTION PRESERVATION (ABSOLUTE): You are STRICTLY FORBIDDEN from deleting, modifying, "
-        "   or commenting out any '#assert' lines, '#define' macros used in assertions, or initial "
-        "   state variable declarations. The test criteria must remain exactly as provided.\n"
-        "10. CONTROLLED REFACTORING: You MAY delete or modify specific event branches within a process "
+        "10. ASSERTION PRESERVATION & INITIALIZATION (CRITICAL): You are STRICTLY FORBIDDEN from deleting, modifying, "
+        "   or commenting out any '#assert' lines or '#define' macros used in assertions. \n"
+        "   EXCEPTION: If an assertion fails at the '<init>' trace, you ARE EXPLICITLY AUTHORIZED AND REQUIRED "
+        "   to change the initial assigned values of global 'var' declarations so they do not violate the "
+        "   invariants at step 0 (e.g., separating starting positions or defaulting signals to safe states).\n"
+        "11. CONTROLLED REFACTORING: You MAY delete or modify specific event branches within a process "
         "    IF AND ONLY IF they cause race conditions, deadlocks, or bypass global synchronization. "
         "    However, you MUST NOT delete an entire process definition or remove an actor's ability to "
         "    participate in the system.\n"
-        "11. REFACTORING AUTHORITY: You have explicit permission to add new global variables \n"
+        "12. REFACTORING AUTHORITY: You have explicit permission to add new global variables \n"
         "   and append new conditions to existing guards to solve starvation or race conditions."
+    ),
+
+    "desired_result_alignment": (
+        "1. TARGET RESULT AWARENESS (CRITICAL): Always check the REQUIRED FINAL RESULT. "
+        "   Do NOT blindly attempt to make all assertions 'Valid'.\n"
+        "2. INTENTIONAL INVALIDATION: If the required result is 'INVALID', you MUST modify the model "
+        "   so that the assertion FAILS. For liveness properties ([]<> or <>), do NOT add fairness variables. "
+        "   Instead, ensure the model can deadlock, livelock, or allow starvation.\n"
+        "3. PRESERVING NEGATIVE PROPERTIES: If fixing a 'Valid' safety property inadvertently makes "
+        "   a liveness property 'Valid' (when it should be 'Invalid'), adjust your fix to ensure "
+        "   it still allows the liveness failure.\n"
+        "4. SYMMETRIC STARVATION (CRITICAL): If symmetric assertions (e.g., <> Track1 and <> Track2) MUST BOTH be INVALID, "
+        "   the model MUST allow symmetric infinite loops. Track 1 must be able to infinitely loop without Track 2 ever starting, "
+        "   AND Track 2 must be able to infinitely loop without Track 1 ever starting. Do not hardcode a forced starting sequence."
     ),
 
     "invalid_assertion_criteria": (
@@ -65,8 +84,19 @@ RULES = {
         "6. IDENTITY TRACKING & PERSISTENCE (CRITICAL): Do not define completion or ownership \n"
         "   based on temporary physical proximity (e.g., Robot_position == Item_position). \n"
         "   Use dedicated state variables (e.g., var C1_Maker = 1;) assigned exactly when the task finishes.\n"
-        "7. INITIALIZATION ALIGNMENT: Global variables MUST be initialized to states that \n"
-        "   satisfy all global invariants (e.g., if []At_most_one_green, do not start with two greens)."
+        "7. INITIALIZATION RESOLUTION: If the verification trace is exactly '<init>', immediately inspect the "
+        "   global variables. You MUST alter their starting values to logically space out actors or restrict "
+        "   resources so the system starts in a mathematically safe state."
+    ),
+
+    "cross_process_interlocking": (
+        "1. MUTUAL EXCLUSION GUARDS: If two interleaved processes manage mutually exclusive resources "
+        "   (e.g., two tracks that cannot both be green), you MUST inject cross-process guard checks. "
+        "   Process A cannot claim the active state without explicitly verifying Process B is in the inactive state "
+        "   (e.g., Track1 turning green MUST require `Track2_signal == SIGNAL_RED`).\n"
+        "2. SHARED RESOURCE CONTENTION: Prevent two actors from evaluating the same open resource simultaneously. "
+        "   If multiple actors can trigger a transition based on identical global conditions, inject a state update "
+        "   or ownership flag in the very first transition to immediately invalidate the guard for the other actor."
     ),
 
     "concurrency_locking": (
@@ -94,8 +124,8 @@ RULES = {
     ),
 
     "liveness": (
-        "1. FAIRNESS INJECTION TEMPLATE (MANDATORY): To fix starvation in interleaved processes,\n"
-        "   you MUST inject a scheduler. \n"
+        "1. FAIRNESS INJECTION RULES: ONLY inject a scheduler/turn-variable if the required result for the "
+        "   liveness assertion is 'VALID'. If the desired result is 'INVALID', DO NOT inject fairness.\n"
         "   - Add 'var turn = 0;' at the top of the file.\n"
         "   - Append '&& turn == 0' to Process A's guards, and add '{turn = 1;}' to its updates.\n"
         "   - Append '&& turn == 1' to Process B's guards, and add '{turn = 0;}' to its updates.\n"
@@ -115,7 +145,7 @@ RULES = {
         "   because an actor can infinitely loop through reversible, non-productive events (e.g., approach "
         "   -> leave -> approach) without ever triggering the goal, you MUST break the loop. You are AUTHORIZED "
         "   to restrict the 'leave' or 'abort' branches by adding phase guards or counters so that once an "
-        "   actor commits to a sequence, they are forced to progress toward the liveness goal."
+        "   actor commits to a sequence, they are forced to progress toward the liveness goal.\n"
         "9. FORCED PROGRESSION (STUTTERING FIX): If a liveness trace shows an actor "
         "   repeatedly performing reversible actions (e.g., approach -> leave) or "
         "   idling (e.g., motor_idle -> motor_pass) without reaching the Goal, "
