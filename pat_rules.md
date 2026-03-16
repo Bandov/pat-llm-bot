@@ -29,3 +29,5 @@
     - `#define goal1 (!on && dim == 50);`
     - `#assert System reaches goal1;`
     - `#assert System |= []<>light50;`
+
+- **Rule**: STRICTLY FORBIDDEN to use ternary operators `? :` in state updates. Use `if (cond) { } else { }` instead.

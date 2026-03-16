@@ -20,18 +20,21 @@ RULES = {
         "   NEVER 'event{} -> Proc()'). Writing 'event{}' will cause a fatal syntax parsing error.\n"
         "8. CHOICE SYNTAX (CRITICAL): Use '[]' between branches. Do NOT put ';' after each branch.\n"
         "   Only terminate the entire process definition once at the end with a single ';' (if needed).\n"
-        "9. TURN-TAKING RULE: If using a turn variable, put 'turn == k' inside each branch guard,\n"
+        "9. NO TERNARY OPERATORS: You are STRICTLY FORBIDDEN from using ternary operators (e.g., 'condition ? true : false') "
+        "   inside state updates. PAT CSP# does not parse them. If you need conditional logic during an update, you MUST use "
+        "   standard 'if (cond) { ... } else { ... }' blocks inside the curly braces.\n"
+        "10. TURN-TAKING RULE: If using a turn variable, put 'turn == k' inside each branch guard,\n"
         "   e.g. [turn==1 && ...] action{turn=2;} -> Proc(). Do NOT wrap choices in [turn==k](...).\n"
-        "10. ASSERTION PRESERVATION & INITIALIZATION (CRITICAL): You are STRICTLY FORBIDDEN from deleting, modifying, "
+        "11. ASSERTION PRESERVATION & INITIALIZATION (CRITICAL): You are STRICTLY FORBIDDEN from deleting, modifying, "
         "   or commenting out any '#assert' lines or '#define' macros used in assertions. \n"
         "   EXCEPTION: If an assertion fails at the '<init>' trace, you ARE EXPLICITLY AUTHORIZED AND REQUIRED "
         "   to change the initial assigned values of global 'var' declarations so they do not violate the "
         "   invariants at step 0 (e.g., separating starting positions or defaulting signals to safe states).\n"
-        "11. CONTROLLED REFACTORING: You MAY delete or modify specific event branches within a process "
+        "12. CONTROLLED REFACTORING: You MAY delete or modify specific event branches within a process "
         "    IF AND ONLY IF they cause race conditions, deadlocks, or bypass global synchronization. "
         "    However, you MUST NOT delete an entire process definition or remove an actor's ability to "
         "    participate in the system.\n"
-        "12. REFACTORING AUTHORITY: You have explicit permission to add new global variables \n"
+        "13. REFACTORING AUTHORITY: You have explicit permission to add new global variables \n"
         "   and append new conditions to existing guards to solve starvation or race conditions."
     ),
 
@@ -47,6 +50,10 @@ RULES = {
         "4. SYMMETRIC STARVATION (CRITICAL): If symmetric assertions (e.g., <> Track1 and <> Track2) MUST BOTH be INVALID, "
         "   the model MUST allow symmetric infinite loops. Track 1 must be able to infinitely loop without Track 2 ever starting, "
         "   AND Track 2 must be able to infinitely loop without Track 1 ever starting. Do not hardcode a forced starting sequence."
+        "5. REACHABILITY INJECTION: If a '#assert ... reaches [State]' property evaluates to INVALID but MUST be VALID, "
+        "   it means the target state is mathematically impossible to reach in the current logic. You MUST explicitly "
+        "   inject a new event branch or modify an existing guard to ALLOW that specific combination of variables "
+        "   (e.g., adding a specific event that allows the engine to be turned off while driving)."
     ),
 
     "invalid_assertion_criteria": (
@@ -87,6 +94,14 @@ RULES = {
         "7. INITIALIZATION RESOLUTION: If the verification trace is exactly '<init>', immediately inspect the "
         "   global variables. You MUST alter their starting values to logically space out actors or restrict "
         "   resources so the system starts in a mathematically safe state."
+        "8. PHYSICAL CONFINEMENT: Actors cannot perform physical transitions (e.g., exiting a vehicle) "
+        "   if the parent container is in an active/moving state. You MUST gate 'exit' or 'leave' events "
+        "   by requiring the system to be STOPPED (e.g., 'drivingStatus == DRIVING_STOPPED').\n"
+        "9. RESOURCE DEPLETION SIDE-EFFECTS: If an event depletes a vital resource to EMPTY (e.g., fuel), "
+        "   it MUST atomically update the dependent active states in the same block. If fuel goes to EMPTY, "
+        "   you MUST force 'drivingStatus = DRIVING_STOPPED' and 'engineStatus = ENGINE_OFF' simultaneously.\n"
+        "10. CONDITIONAL LOCKING (NO TRAPPING): Prevent locked-in or locked-out states by checking container "
+        "    contents before sealing. Do NOT allow a door to 'lock' if the key is inside but the owners are outside."
     ),
 
     "cross_process_interlocking": (
@@ -154,6 +169,15 @@ RULES = {
         "   - Once a critical step is taken (e.g., owner enters car), set it to true. \n"
         "   - Use this variable to disable 'reversal' events (like owner_leave or motor_idle) "
         "     so the system is forced to move toward the terminal Goal."
+        "10. INTERRUPT RECOVERY (CRITICAL): If a global liveness property ([]<> Goal) must be VALID, "
+        "    but the model contains a terminal interrupt (e.g., 'interrupt (event -> Stop)'), the liveness "
+        "    will inevitably fail because 'Stop' deadlocks the system. You MUST replace 'Stop' with a recursive "
+        "    call to the main system process (e.g., 'interrupt (event -> recover -> SystemProc)') so the model can continue."
+        "11. ERROR-RECOVERY LIVELOCKS (INTERRUPT THROTTLING): If a liveness trace shows an infinite loop "
+        "    where the system repeatedly triggers an error/interrupt (e.g., 'water_sensor_high') and recovers "
+        "    without ever reaching the goal (e.g., 'start_driving'), you MUST throttle the interrupt. "
+        "    Introduce a state variable (e.g., 'var hazard_active = 0;') that prevents the interrupt from firing "
+        "    again until the primary liveness goal has been successfully executed at least once."
     ),
 
     "resource_management": (
