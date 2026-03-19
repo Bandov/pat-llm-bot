@@ -217,22 +217,22 @@ class RepairEngine:
             output = self._clean_output(parsed["content"])
             sanitized = self._global_sanitizer(output)
 
-            if parsed["status"] == "invalid_assertion":
-                base_model = sanitized if sanitized else full_context
-                tagged = self._tag_invalid_assertion(base_model, target_assertion)
-                return {
-                    "status": "invalid_assertion",
-                    "model": tagged,
-                    "reason": parsed.get("reason") or "No reason provided."
-                }
+            # if parsed["status"] == "invalid_assertion":
+            #     base_model = sanitized if sanitized else full_context
+            #     tagged = self._tag_invalid_assertion(base_model, target_assertion)
+            #     return {
+            #         "status": "invalid_assertion",
+            #         "model": tagged,
+            #         "reason": parsed.get("reason") or "No reason provided."
+            #     }
 
-            if self._too_destructive(full_context, sanitized, drop_ratio=0.50):
-                tagged = self._tag_invalid_assertion(full_context, target_assertion)
-                return {
-                    "status": "invalid_assertion",
-                    "model": tagged,
-                    "reason": "Repair required deleting/renaming existing event branches; violates non-destructive constraint."
-                }
+            # if self._too_destructive(full_context, sanitized, drop_ratio=0.50):
+            #     tagged = self._tag_invalid_assertion(full_context, target_assertion)
+            #     return {
+            #         "status": "invalid_assertion",
+            #         "model": tagged,
+            #         "reason": "Repair required deleting/renaming existing event branches; violates non-destructive constraint."
+            #     }
 
             return {"status": "repaired", "model": sanitized, "reason": None}
 

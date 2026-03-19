@@ -156,19 +156,31 @@ def main():
                 
                 # Contextual prompts based on the desired result vs current state
                 if str(desired).lower() == "invalid" and str(status).lower() == "valid":
-                    error_context = (
-                        f"Assertion: {assertion_text}\n"
-                        f"Goal: This assertion currently evaluates to VALID, but it MUST evaluate to INVALID.\n"
-                        f"Failure: Because it is currently Valid, it means EVERY possible mathematical path eventually triggers this property. "
-                        f"The system is structurally biased or too fair. You MUST introduce a valid path (an infinite loop or a deadlock) "
-                        f"where this property is NEVER triggered. Ensure mathematical symmetry so competing processes can infinitely starve each other from the very first step.\n"
-                        f"Trace: {error_trace}"
-                    )
+                    if "reaches" in assertion_text or "[]" in assertion_text and "<>" not in assertion_text:
+                        # Safety / Reachability - We want to PREVENT a bad state
+                        error_context = (
+                            f"Assertion: {assertion_text}\n"
+                            f"Goal: This bad state must be UNREACHABLE (INVALID), but currently PAT found a path to it (VALID).\n"
+                            f"Failure: You are missing strict safety guards. You MUST locate the events that cause this state "
+                            f"(e.g., lock_door, consume_fuel, owner_exit) and add strict negative guards or atomic variable updates "
+                            f"to make this state mathematically impossible to reach.\n"
+                            f"Trace: {error_trace}"
+                        )
+                    else:
+                        # Liveness - We want to intentionally ALLOW starvation
+                        error_context = (
+                            f"Assertion: {assertion_text}\n"
+                            f"Goal: This liveness assertion currently evaluates to VALID, but it MUST evaluate to INVALID.\n"
+                            f"Failure: The system is structurally biased or too fair. You MUST introduce a valid path (an infinite loop or a deadlock) "
+                            f"where this goal is NEVER reached. Ensure mathematical symmetry so competing processes can infinitely starve each other.\n"
+                            f"Trace: {error_trace}"
+                        )
                 elif str(desired).lower() == "valid" and str(status).lower() == "invalid":
                     error_context = (
                         f"Assertion: {assertion_text}\n"
                         f"Goal: This assertion evaluates to INVALID, but it MUST evaluate to VALID.\n"
-                        f"Failure: The property failed. You must fix the model to ensure this property holds based on the trace below:\n"
+                        f"Failure: The system is over-constrained, deadlocked, or stuck in a stuttering livelock (an infinite loop of non-productive events). "
+                        f"You MUST remove artificial 'idle' or 'skip' self-loops, break reversible action loops, and ensure the 'happy path' guards allow the actors to progress.\n"
                         f"Trace: {error_trace}"
                     )
                 else:

@@ -35,7 +35,20 @@ RULES = {
         "    However, you MUST NOT delete an entire process definition or remove an actor's ability to "
         "    participate in the system.\n"
         "13. REFACTORING AUTHORITY: You have explicit permission to add new global variables \n"
-        "   and append new conditions to existing guards to solve starvation or race conditions."
+        "   and append new conditions to existing guards to solve starvation or race conditions.\n"
+        "14. NO INLINE EVENT PARAMETERS: You are STRICTLY FORBIDDEN from generating events with inline "
+        "    parameter definitions like 'event(x:{0..3})'. To allow an actor to choose from a range of values, "
+        "    you MUST use the generalized choice operator '[] x:{0..3} @ [guard] event.x{updates;} -> Proc()'."
+        "15. ARRAY BOOLEAN BAN: PAT CSP# does NOT support 'true' or 'false' keywords inside array initializations. "
+        "    If you are initializing an array of boolean flags, you MUST use '1' for true and '0' for false "
+        "    (e.g., 'var flags[2] = [0, 1];', NEVER 'var flags[2] = [false, true];').\n"
+        "16. NO PROCESS COMPOSITION GUARDS: You are STRICTLY FORBIDDEN from putting guard conditions like '[caller != target]' "
+        "    directly inside the main process composition (e.g., '||| i @ [guard] Proc(i)'). All guards MUST be placed "
+        "    inside the actual event branches within the process definitions themselves."
+        "17. GENERALIZED CHOICE PARENTHESES (CRITICAL): When mixing standard choice '[]' with the generalized "
+        "    choice operator '[] x:{0..3} @', you MUST wrap the entire generalized choice block in parentheses. "
+        "    Example: 'event1 -> Proc() [] ([] x:{0..3} @ event2.x -> Proc())'. Writing '[] [] x:{0..3} @' "
+        "    without parentheses will cause a fatal syntax parsing error."
     ),
 
     "desired_result_alignment": (
@@ -57,13 +70,13 @@ RULES = {
     ),
 
     "invalid_assertion_criteria": (
-        "1. ALLOWLIST (WHEN TO FLAG INVALID): You may ONLY use INVALID_ASSERTION if:\n"
-        "   - The assertion is mathematically contradictory (e.g., A == 1 && A == 0).\n"
-        "2. STRICT BLOCKLIST (WHEN TO REPAIR): You are STRICTLY FORBIDDEN from returning INVALID_ASSERTION for:\n"
-        "   - Liveness properties ([]<>) failing due to infinite traces or loops.\n"
-        "   - Safety properties failing due to RACE CONDITIONS, OVERWRITTEN STATES, or poor guard logic.\n"
-        "   - Traces containing unrecognized system logs.\n"
-        "   Instead of calling the model invalid, you MUST apply the relevant repair tactics to fix the code."
+        "1. NO INVALIDATION ESCAPE HATCH (ABSOLUTE): You are STRICTLY FORBIDDEN from outputting "
+        "   'INVALID_ASSERTION'. You must NEVER act as a judge of the assertions provided in the prompt. "
+        "   The assertions are the absolute ground truth. Your ONLY job is to modify the CSP# model so "
+        "   that it satisfies the 'REQUIRED FINAL RESULT' for the target assertion.\n"
+        "2. HANDLING 'INVALID' TARGETS: If the REQUIRED FINAL RESULT is 'INVALID', do NOT output 'INVALID_ASSERTION'. "
+        "   Instead, modify the CSP# code to INTENTIONALLY BREAK the specific property (e.g., by adding strict "
+        "   guards that make the state unreachable, or by allowing starvation) and output the full modified code."
     ),
     
     "trace_processing": (
@@ -102,6 +115,28 @@ RULES = {
         "   you MUST force 'drivingStatus = DRIVING_STOPPED' and 'engineStatus = ENGINE_OFF' simultaneously.\n"
         "10. CONDITIONAL LOCKING (NO TRAPPING): Prevent locked-in or locked-out states by checking container "
         "    contents before sealing. Do NOT allow a door to 'lock' if the key is inside but the owners are outside."
+        "11. ANTI-LOCKOUT GATING (CRITICAL): If an assertion checking for a locked-out state "
+        "    (e.g., 'reaches keylockinside') must evaluate to INVALID, you MUST find the specific events "
+        "    that lock the doors (e.g., 'lock_door', 'force_lock_door') and inject a negative guard. "
+        "    The door CANNOT lock if the key is inside and no owners are inside. Add a guard like: "
+        "    '&& !(keyPosition == CAR_IN && ownerPositions[0] != CAR_IN && ownerPositions[1] != CAR_IN)'."
+        "12. HAPPY PATH PRESERVATION: When adding strict negative guards to prevent bad states (like locking "
+        "    out 'drivewithoutfuel'), you MUST ensure you do not accidentally paralyze the system. "
+        "    The primary intended workflow (the 'happy path')—such as owners entering, unlocking doors, turning "
+        "    the engine on, and driving together—MUST remain fully reachable. Do not lock the doors permanently."
+        "13. UNGUARDED TRANSITION BAN (ANTI-STUTTERING): You are STRICTLY FORBIDDEN from generating unguarded state transitions. "
+        "    If an event updates a variable to a specific value (e.g., '{windowStatus = WINDOW_CLOSED;}'), the event MUST have "
+        "    a guard ensuring the variable is not already in that state (e.g., '[windowStatus != WINDOW_CLOSED]'). "
+        "    Unguarded transitions create infinite stuttering livelocks and destroy []<> liveness properties.\n"
+        "14. NO MALICIOUS INJECTIONS (CRITICAL): Do NOT invent 'reckless', 'leak', 'stall', or 'force_fail' events. "
+        "    If a target assertion must be INVALID, your job is to ADD strict physical and logical guards to the normal "
+        "    system actions to PREVENT the bad state. You must actively DELETE any malicious branches that intentionally "
+        "    bypass safety logic."
+        "15. TARGETED STATE PREVENTION (EXPLICIT): If an assertion checks for a specific bad state and MUST be INVALID, "
+        "    you must explicitly trace the macro definition and negate it on the source events. \n"
+        "    - For 'keylockinside': You MUST add '&& !(keyPosition == CAR_IN && ownerPositions[0] != CAR_IN && ownerPositions[1] != CAR_IN)' to ALL door locking events.\n"
+        "    - For 'runwithoutowner': You MUST add '&& drivingStatus == DRIVING_STOPPED' to ALL owner exit events so they cannot jump out of a moving car.\n"
+        "    - For 'drivewithoutfuel': You MUST atomically add 'drivingStatus = DRIVING_STOPPED; engineStatus = ENGINE_OFF;' to the exact event that sets fuel to EMPTY."
     ),
 
     "cross_process_interlocking": (
@@ -178,6 +213,24 @@ RULES = {
         "    without ever reaching the goal (e.g., 'start_driving'), you MUST throttle the interrupt. "
         "    Introduce a state variable (e.g., 'var hazard_active = 0;') that prevents the interrupt from firing "
         "    again until the primary liveness goal has been successfully executed at least once."
+        "12. LAZY ACTOR LIVELOCK (SKIP/ABORT BAN): If a liveness trace ([]<> Goal) fails because the system "
+        "    gets stuck in an infinite loop of 'skip' events (e.g., 'skip_enter', 'skip_engine') or non-productive "
+        "    abort actions (e.g., opening a door and immediately closing it without entering), you MUST force progression. "
+        "    You are EXPLICITLY AUTHORIZED to either DELETE the 'skip' branches that allow actors to bypass the critical path, "
+        "    or gate them with a progress flag so they cannot be triggered infinitely without achieving the goal first."
+        "13. IDLE LOOP BAN (ANTI-STUTTERING): You are STRICTLY FORBIDDEN from creating artificial 'idle', 'wait', "
+        "    'skip', or 'do_nothing' self-loops (e.g., 'window_loop_idle -> window()'). These dummy loops instantly "
+        "    cause stuttering livelocks and destroy all []<> properties. If a process has nothing to do, it MUST simply "
+        "    not have an enabled guard. Do NOT add empty fallback transitions."
+        "14. REVERSIBLE ACTION LIVELOCK BAN: If a liveness trace gets trapped infinitely toggling between two "
+        "    reversible physical states (e.g., 'open_window -> close_window -> open_window'), you MUST force progression. "
+        "    You are AUTHORIZED to add a progress flag (e.g., 'var window_moved = 0;') to limit these actions "
+        "    so they can only occur ONCE until a major system goal (like driving) is achieved, breaking the infinite stall loop."
+        "15. COMPONENT-LEVEL LIVELOCK DEFEAT (CRITICAL): If a trace shows an infinite loop of toggling component states "
+        "    (e.g., '(open_window -> close_window)*' or '(lock_door -> unlock_door)*'), you MUST inject a local limit counter. "
+        "    Create a variable (e.g., 'var window_moves = 0;'), gate the toggle events with '[window_moves < 2]', increment it "
+        "    on toggle, and reset it ONLY when the main system goal (e.g., 'start_driving') occurs. You must physically "
+        "    exhaust the system's ability to stutter."
     ),
 
     "resource_management": (
@@ -185,6 +238,12 @@ RULES = {
         "   it MUST update the availability flag in the SAME event update block '{...}'.\n"
         "2. MONITOR ANTI-PATTERN REMOVAL: Do NOT use separate asynchronous processes to monitor "
         "   physical positions and update locks. Merge the lock updates directly into the actor's transition."
+        "3. TWO-PHASE RESOURCE LOCKING (TOCTOU PREVENTION): If claiming a global resource requires a two-phase "
+        "   handshake (e.g., 'Request/Wait' -> 'Connect/Engage'), you MUST check the resource limit AND increment "
+        "   the usage counter during the INITIAL request phase (e.g., 'initiate_call'), NOT the connect phase. "
+        "   If you wait until 'connect' to claim the lock, multiple interleaved actors will bypass the limit while waiting, "
+        "   causing global assertions (e.g., 'At most 1 call') to fail. If a call is rejected or aborted during the wait, "
+        "   decrement the counter to release the lock."
     ),
 
     "lifecycle_coupling": (
@@ -196,6 +255,11 @@ RULES = {
         "4. GLOBAL SYNCHRONIZATION OVERRIDE: If a local process has a branch that unilaterally resets "
         "   its state while a global controller is still processing that actor, DELETE the local reset branch. "
         "   Force the local actor to wait for the global controller to release them."
+        "5. SIMULTANEOUS TRANSITION DEADLOCKS (CRITICAL): When two actors are coupled in a shared state (e.g., both are ENGAGED) "
+        "   and either can initiate a disconnect (e.g., transitioning to HANGING_UP), you MUST include a dedicated branch "
+        "   to handle if BOTH actors independently transition to the disconnecting state simultaneously. "
+        "   For example, you must have a branch where [caller == HANGING_UP && target == HANGING_UP] that safely cleans "
+        "   up the state, otherwise the system will inevitably deadlock."
     ),
     
     "generalization_and_overfitting": (

@@ -1,107 +1,65 @@
-#define ENGINE_OFF 0;
-#define ENGINE_ON 1;
-#define DRIVING_STOPPED 2;
-#define DRIVING_DRIVING 3;
-#define FUEL_EMPTY 4;
-#define FUEL_LOW 5;
-#define FUEL_MEDIUM 6;
-#define FUEL_FULL 7;
-#define DOOR_OPEN 8;
-#define DOOR_UNLOCKED 9;
-#define DOOR_LOCKED 10;
-#define CAR_IN 11;
-#define CAR_FAR 12;
-#define KEY_WITH_OWNER 13;
-#define OWNER_NEAR 14;
-#define WINDOW_OPEN 16;
-#define WINDOW_HALF_OPENED 17;
-#define WINDOW_CLOSED 18;
+#define TELE_LINE_IDLE 0;
+#define TELE_LINE_BUSY 1;
+#define USER_COUNT 4;
+#define USER_ONHOOK_IDLE 10;
+#define USER_DIALING 11;
+#define USER_WAITING 12;
+#define USER_ANSWERING 13;
+#define USER_IGNORING 14;
+#define USER_ENGAGED 15;
+#define USER_HANGING_UP 16;
 
-var engineStatus = ENGINE_OFF;
-var drivingStatus = DRIVING_STOPPED;
-var fuelLevel = FUEL_FULL;
-var doorStatus = DOOR_LOCKED;
-var keyPosition = KEY_WITH_OWNER;
-var ownerPositions[2] = [CAR_FAR, CAR_FAR];
-var windowStatus = WINDOW_CLOSED;
-var turn = 0;
-var emergency_occurred = 0;
+var lineState = TELE_LINE_IDLE;
+var handsetStates[USER_COUNT] = [USER_ONHOOK_IDLE, USER_ONHOOK_IDLE, USER_ONHOOK_IDLE, USER_ONHOOK_IDLE];
 
-Motor() = 
-    [turn == 6] turn_engine_on{engineStatus = ENGINE_ON; turn = 61;} -> Motor()
+tele_line(caller, target) = 
+    [lineState == TELE_LINE_IDLE && handsetStates[caller] == USER_DIALING && handsetStates[target] == USER_ONHOOK_IDLE] 
+    initiate_ringing_call{lineState = TELE_LINE_BUSY; handsetStates[caller] = USER_WAITING; handsetStates[target] = USER_WAITING;} -> tele_line(caller, target)
     []
-    [turn == 6] skip_engine{engineStatus = ENGINE_OFF; turn = 61;} -> Motor()
+    [lineState == TELE_LINE_IDLE && handsetStates[caller] == USER_DIALING && 
+     (handsetStates[target] == USER_DIALING || handsetStates[target] == USER_WAITING || 
+      handsetStates[target] == USER_ANSWERING || handsetStates[target] == USER_IGNORING || 
+      handsetStates[target] == USER_ENGAGED || handsetStates[target] == USER_HANGING_UP)]
+    initiate_busy_call{lineState = TELE_LINE_BUSY; handsetStates[caller] = USER_WAITING;} -> tele_line(caller, target)
     []
-    [turn == 61] fill_fuel{fuelLevel = FUEL_FULL; turn = 7;} -> Motor()
+    [lineState == TELE_LINE_BUSY && handsetStates[caller] == USER_WAITING && handsetStates[target] == USER_ANSWERING]
+    connect_call{handsetStates[caller] = USER_ENGAGED; handsetStates[target] = USER_ENGAGED;} -> tele_line(caller, target)
     []
-    [turn == 61] drain_fuel{fuelLevel = FUEL_EMPTY; turn = 7;} -> Motor()
+    [lineState == TELE_LINE_BUSY && handsetStates[caller] == USER_HANGING_UP && handsetStates[target] == USER_ENGAGED]
+    disconnect_call_caller{lineState = TELE_LINE_IDLE; handsetStates[caller] = USER_ONHOOK_IDLE; handsetStates[target] = USER_ONHOOK_IDLE;} -> tele_line(caller, target)
     []
-    [turn == 7] start_driving{drivingStatus = DRIVING_DRIVING; turn = 8;} -> Motor()
+    [lineState == TELE_LINE_BUSY && handsetStates[caller] == USER_ENGAGED && handsetStates[target] == USER_HANGING_UP]
+    disconnect_call_target{lineState = TELE_LINE_IDLE; handsetStates[caller] = USER_ONHOOK_IDLE; handsetStates[target] = USER_ONHOOK_IDLE;} -> tele_line(caller, target)
     []
-    [turn == 8] stop_driving{drivingStatus = DRIVING_STOPPED; turn = 9;} -> Motor()
-    []
-    [turn == 8] engine_failure{engineStatus = ENGINE_OFF; drivingStatus = DRIVING_STOPPED; turn = 9;} -> Motor()
-    []
-    [turn == 0 || turn == 1 || turn == 2 || turn == 3 || turn == 4 || turn == 5 || turn == 9] motor_idle -> Motor();
+    [lineState == TELE_LINE_BUSY && handsetStates[caller] == USER_WAITING && 
+     (handsetStates[target] == USER_DIALING || handsetStates[target] == USER_WAITING || 
+      handsetStates[target] == USER_ANSWERING || handsetStates[target] == USER_IGNORING || 
+      handsetStates[target] == USER_ENGAGED || handsetStates[target] == USER_HANGING_UP)]
+    reset_after_busy{lineState = TELE_LINE_IDLE; handsetStates[caller] = USER_ONHOOK_IDLE;} -> tele_line(caller, target);
 
-Door() = 
-    [turn == 1] unlock_door{doorStatus = DOOR_UNLOCKED; turn = 2;} -> Door()
+user(i) = 
+    [handsetStates[i] == USER_ONHOOK_IDLE]
+    start_dial{handsetStates[i] = USER_DIALING;} -> user(i)
     []
-    [turn == 3] open_door{doorStatus = DOOR_OPEN; turn = 4;} -> Door()
+    [handsetStates[i] == USER_WAITING]
+    answer_incoming_call{handsetStates[i] = USER_ANSWERING;} -> user(i)
     []
-    [turn == 5] close_door{doorStatus = DOOR_LOCKED; turn = 6;} -> Door()
+    [handsetStates[i] == USER_WAITING]
+    ignore_incoming_call{handsetStates[i] = USER_IGNORING;} -> user(i)
     []
-    [turn == 5] prevent_lockout{doorStatus = DOOR_UNLOCKED; turn = 6;} -> Door()
+    [handsetStates[i] == USER_ENGAGED]
+    hang_up{handsetStates[i] = USER_HANGING_UP;} -> user(i)
     []
-    [turn == 0 || turn == 2 || turn == 4 || turn == 6 || turn == 61 || turn == 7 || turn == 8 || turn == 9] door_idle -> Door();
+    [handsetStates[i] == USER_HANGING_UP]
+    complete_hang_up{handsetStates[i] = USER_ONHOOK_IDLE;} -> user(i);
 
-Key() = 
-    [turn == 2] key_to_car{keyPosition = CAR_IN; turn = 3;} -> Key()
-    []
-    [turn == 2] key_to_owner{keyPosition = KEY_WITH_OWNER; turn = 3;} -> Key()
-    []
-    [turn == 2] key_to_far{keyPosition = CAR_FAR; turn = 3;} -> Key()
-    []
-    [turn == 0 || turn == 1 || turn == 3 || turn == 4 || turn == 5 || turn == 6 || turn == 61 || turn == 7 || turn == 8 || turn == 9] key_idle -> Key();
+telecom_service = (||| i:{0..USER_COUNT-1} @ user(i)) ||| (||| caller:{0..USER_COUNT-1} @ (||| target:{0..USER_COUNT-1} @ [caller != target]tele_line(caller, target)));
 
-Owner() = 
-    [turn == 0] finish_move{turn = 1;} -> Owner()
-    []
-    [turn == 4] owner1_enter{ownerPositions[0] = CAR_IN; turn = 5;} -> Owner()
-    []
-    [turn == 4] owner2_enter{ownerPositions[1] = CAR_IN; turn = 5;} -> Owner()
-    []
-    [turn == 4] both_enter{ownerPositions[0] = CAR_IN; ownerPositions[1] = CAR_IN; turn = 5;} -> Owner()
-    []
-    [turn == 4] skip_enter{turn = 5;} -> Owner()
-    []
-    [turn == 8] owners_jump_out{ownerPositions[0] = CAR_FAR; ownerPositions[1] = CAR_FAR; turn = 9;} -> Owner()
-    []
-    [turn == 1 || turn == 2 || turn == 3 || turn == 5 || turn == 6 || turn == 61 || turn == 7 || turn == 9] owner_idle -> Owner();
-
-Window() = 
-    [turn == 9] window_close{windowStatus = WINDOW_CLOSED; turn = 0;} -> Window()
-    []
-    [turn == 9] window_open{windowStatus = WINDOW_OPEN; turn = 0;} -> Window()
-    []
-    [turn == 0 || turn == 1 || turn == 2 || turn == 3 || turn == 4 || turn == 5 || turn == 6 || turn == 61 || turn == 7 || turn == 8] window_idle -> Window();
-
-tesla() = (Motor() ||| Door() ||| Key() ||| Owner() ||| Window()) 
-          interrupt ([emergency_occurred == 0] water_sensor_high{doorStatus = DOOR_UNLOCKED; windowStatus = WINDOW_OPEN; emergency_occurred = 1; turn = 0;} -> submerge -> stop_driving_emergency{drivingStatus = DRIVING_STOPPED; engineStatus = ENGINE_OFF; emergency_occurred = 0; turn = 0;} -> tesla());
-
-#define openAll (doorStatus == DOOR_UNLOCKED && windowStatus == WINDOW_OPEN);
-#define keylockinside (keyPosition == CAR_IN && doorStatus == DOOR_LOCKED && ownerPositions[0] != CAR_IN && ownerPositions[1] != CAR_IN);
-#define runwithoutowner (drivingStatus == DRIVING_DRIVING && ownerPositions[0] == CAR_FAR && ownerPositions[1] == CAR_FAR);
-#define ownerdrivetogether (drivingStatus == DRIVING_DRIVING && ownerPositions[0] == CAR_IN && ownerPositions[1] == CAR_IN);
-#define drivewithoutengineon (drivingStatus == DRIVING_DRIVING && engineStatus == ENGINE_OFF);
-#define drivewithoutfuel (drivingStatus == DRIVING_DRIVING && fuelLevel == FUEL_EMPTY);
-#define drivewithoutkeyholdbyother (drivingStatus == DRIVING_DRIVING && ownerPositions[1] == CAR_IN && ownerPositions[0] == CAR_FAR && keyPosition == KEY_WITH_OWNER);
-
-#assert tesla() |= water_sensor_high -> X openAll;
-#assert tesla() |= []<> start_driving;
-#assert tesla() reaches keylockinside;
-#assert tesla() reaches runwithoutowner;
-#assert tesla() reaches ownerdrivetogether;
-#assert tesla() reaches drivewithoutengineon;
-#assert tesla() reaches drivewithoutfuel;
-#assert tesla() reaches drivewithoutkeyholdbyother;
+#define user0_connected_to_user1 (handsetStates[0] == USER_ENGAGED && handsetStates[1] == USER_ENGAGED);
+#define all_user_on_call (handsetStates[0] == USER_ENGAGED && handsetStates[1] == USER_ENGAGED && handsetStates[2] == USER_ENGAGED && handsetStates[3] == USER_ENGAGED);
+#define user2_in_call (handsetStates[2] == USER_ENGAGED);
+#define user3_in_call (handsetStates[3] == USER_ENGAGED);
+#assert telecom_service deadlockfree;
+#assert telecom_service reaches user0_connected_to_user1;
+#assert telecom_service reaches all_user_on_call;
+#assert telecom_service |= [](user0_connected_to_user1 -> (!user2_in_call && !user3_in_call));
