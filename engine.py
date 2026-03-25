@@ -70,7 +70,7 @@ class RepairEngine:
             raise ValueError("GEMINI_API_KEY missing from .env")
         
         self.client = genai.Client(api_key=api_key)
-        self.model_id = 'gemini-3-flash-preview'
+        self.model_id = 'gemini-2.5-flash'
         self.mandatory_syntax = self._load_external_rules(rules_path)
 
     def _load_external_rules(self, path):
@@ -129,7 +129,6 @@ class RepairEngine:
         preserve_assertions_block = "\n".join(other_assertions) if other_assertions else "(none)"
         
         # --- NEW LOGIC: SYNTAX OVERRIDE ---
-        # --- NEW LOGIC: SYNTAX OVERRIDE ---
         if is_syntax_error:
             strategy_list.append(
                 "### SYNTAX REPAIR STRATEGY (CRITICAL) ###\n"
@@ -166,11 +165,26 @@ class RepairEngine:
 
             # DYNAMIC TASK DIRECTIVE based on the desired result
             if str(desired_result).lower() == "invalid":
-                task_directive = (
-                    f"CRITICAL TASK: The target assertion ({target_assertion}) MUST FAIL. \n"
-                    f"Your goal is to INTENTIONALLY EXPOSE A FLAW (e.g., allow starvation, deadlock, or race conditions) "
-                    f"so that this specific assertion evaluates to INVALID. Do NOT use fairness injections here."
-                )
+                # --- NEW DYNAMIC INJECTION FOR LIVENESS STARVATION ---
+                if "<>" in target_assertion:
+                    task_directive = (
+                        "========================================================================\n"
+                        "CRITICAL DYNAMIC OVERRIDE: LIVENESS INTENTIONAL FAILURE DETECTED\n"
+                        "========================================================================\n"
+                        f"CRITICAL TASK: The target assertion ({target_assertion}) MUST FAIL (Evaluate to INVALID).\n"
+                        "Because this is an 'eventually' (<>) assertion, YOU MUST ALLOW STARVATION.\n"
+                        "- DELETE any 'turn' variables or strict alternating schedulers completely.\n"
+                        "- Use pure non-deterministic '[]' choices for shared resources.\n"
+                        "- Ensure it is mathematically possible for one actor to infinitely loop while the other waits forever.\n"
+                        "========================================================================\n"
+                    )
+                else:
+                    # Standard safety invalidation
+                    task_directive = (
+                        f"CRITICAL TASK: The target assertion ({target_assertion}) MUST FAIL. \n"
+                        f"Your goal is to INTENTIONALLY EXPOSE A FLAW (e.g., allow starvation, deadlock, or race conditions) "
+                        f"so that this specific assertion evaluates to INVALID. Do NOT use fairness injections here."
+                    )
             else:
                 task_directive = (
                     f"CRITICAL TASK: The target assertion ({target_assertion}) MUST PASS. \n"

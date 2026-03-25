@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import re
 from engine import RepairEngine
 from verifier import PATVerifier
 
@@ -8,7 +9,35 @@ from verifier import PATVerifier
 MODELS_DIR = "./models"
 OUTPUT_DIR = "./repaired_models"
 INITIAL_LOG_FILE = "mismatch_traces.json"
-MAX_ITERATIONS = 5
+MAX_ITERATIONS = 4
+
+def normalize_assertion(assertion_text):
+    """Helper to remove empty parentheses and extra spaces for exact dictionary matching."""
+    if not assertion_text: return ""
+    return assertion_text.replace("()", "").replace(" ", "").strip()
+
+def deduplicate_and_clean_issues(issues, expected_target, base_name):
+    """
+    Removes contradictory duplicates and dynamically rewrites the assertion 
+    strings to match the exact formatting of the original .csp file.
+    """
+    seen = {}
+    deduped = []
+    
+    for issue in issues:
+        raw_assert = issue.get('assertion', '')
+        norm_assert = normalize_assertion(raw_assert)
+        
+        if norm_assert not in seen:
+            if expected_target and base_name:
+                # Force the JSON string to match the original file's signature
+                issue['assertion'] = re.sub(rf'\b{base_name}(\s*\(\))?\s*\|=', f'{expected_target} |=', raw_assert)
+            seen[norm_assert] = True
+            deduped.append(issue)
+        else:
+            print(f"[!] Dropping contradictory duplicate target: {raw_assert}")
+            
+    return deduped
 
 def filter_fixable_errors(issues):
     """
@@ -20,52 +49,31 @@ def filter_fixable_errors(issues):
         current = entry.get('current_result')
         desired = entry.get('desired_result') 
         
-        # Skip LLM flagged invalid assertions
         if current == "Invalid_Assertion":
             continue
             
-        # If a desired result is provided, only keep it if there's a mismatch.
         if desired and current and str(desired).lower() == str(current).lower():
             continue
             
         fixable.append(entry)
     return fixable
 
-def normalize_assertion(assertion_text):
-    """Helper to remove empty parentheses and extra spaces for exact matching."""
-    if not assertion_text: return ""
-    return assertion_text.replace("()", "").strip()
-
 def reconcile_issues(tracked_issues, verifier_output):
-    """
-    Cross-references the verifier's raw output against the tracked issues
-    to maintain the correct 'desired_result' and catch hidden 'Valid' states.
-    """
-    # 1. If the verifier hit a Syntax Error, immediately return it
+    """Cross-references the verifier's raw output against the tracked issues."""
     for issue in verifier_output:
         if issue.get("current_result") == "Syntax_Error":
             return [issue]
             
-    # 2. Map issues using NORMALIZED keys so 'keyless_car' matches 'keyless_car()'
-    tracked_map = { 
-        normalize_assertion(issue['assertion']): issue 
-        for issue in tracked_issues if issue.get('assertion') 
-    }
-    
-    verifier_map = { 
-        normalize_assertion(issue['assertion']): issue 
-        for issue in verifier_output if issue.get('assertion') 
-    }
+    tracked_map = { normalize_assertion(issue['assertion']): issue for issue in tracked_issues if issue.get('assertion') }
+    verifier_map = { normalize_assertion(issue['assertion']): issue for issue in verifier_output if issue.get('assertion') }
     
     reconciled = []
     
-    # 3. Update the status of all tracked target assertions
     for norm_assertion, tracked_issue in tracked_map.items():
-        original_assertion_text = tracked_issue['assertion'] # Keep original formatting
+        original_assertion_text = tracked_issue['assertion']
         desired = tracked_issue.get('desired_result', 'Valid')
         
         if norm_assertion in verifier_map:
-            # The verifier explicitly flagged this as "is NOT valid" -> currently Invalid
             reconciled.append({
                 "assertion": original_assertion_text,
                 "trace": verifier_map[norm_assertion].get('trace', ''),
@@ -73,7 +81,6 @@ def reconcile_issues(tracked_issues, verifier_output):
                 "desired_result": desired
             })
         else:
-            # The verifier ignored it, meaning PAT evaluated it as "Valid"
             reconciled.append({
                 "assertion": original_assertion_text,
                 "trace": "Property satisfied.",
@@ -81,14 +88,13 @@ def reconcile_issues(tracked_issues, verifier_output):
                 "desired_result": desired
             })
             
-    # 4. Catch NEW regressions (things that broke that weren't tracked)
     for norm_assertion, v_issue in verifier_map.items():
         if norm_assertion not in tracked_map and norm_assertion not in ["PARSING", "EXECUTION"]:
             reconciled.append({
                 "assertion": v_issue['assertion'],
                 "trace": v_issue.get('trace', ''),
                 "current_result": "Invalid",
-                "desired_result": "Valid" # New breaks default to wanting to be Valid
+                "desired_result": "Valid"
             })
             
     return reconciled
@@ -102,8 +108,23 @@ def main():
         return
     
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    original_path = os.path.join(MODELS_DIR, "model.csp")
     
-    # [PHASE 0]: Load initial mismatches
+    # --- [PHASE 0A]: DYNAMIC SIGNATURE DETECTION ---
+    expected_target = None
+    base_name = None
+    if os.path.exists(original_path):
+        with open(original_path, 'r') as f:
+            original_csp = f.read()
+            # Hunt for the first assertion to see how the system is called
+            match = re.search(r'#assert\s+([A-Za-z0-9_]+)(\s*\(\))?\s*\|=', original_csp)
+            if match:
+                base_name = match.group(1)
+                has_parens = bool(match.group(2))
+                expected_target = f"{base_name}()" if has_parens else base_name
+                print(f"[*] Detected ground-truth system signature: '{expected_target}'")
+
+    # --- [PHASE 0B]: LOAD AND SCRUB MISMATCHES ---
     if not os.path.exists(INITIAL_LOG_FILE):
         print(f"[!] Could not find initial {INITIAL_LOG_FILE}.")
         return
@@ -112,25 +133,24 @@ def main():
         try:
             current_issues = json.load(f)
         except json.JSONDecodeError:
-            print(f"[!] Error reading {INITIAL_LOG_FILE}. Ensure it contains valid JSON.")
+            print(f"[!] Error reading {INITIAL_LOG_FILE}.")
             return
 
-    # Initial filter
+    # Pass the detected signature to the scrubber
+    current_issues = deduplicate_and_clean_issues(current_issues, expected_target, base_name)
     fixable_errors = filter_fixable_errors(current_issues)
     
     if not fixable_errors:
-        print(f"[🎉] No fixable errors in the initial {INITIAL_LOG_FILE}. Model is already verified!")
+        print(f"[🎉] No fixable errors. Model is already verified!")
         return
 
     last_model_content = ""
     repaired_path = os.path.join(OUTPUT_DIR, "repaired_model.csp")
-    original_path = os.path.join(MODELS_DIR, "model.csp")
     target_model = repaired_path if os.path.exists(repaired_path) else original_path
 
     for iteration in range(1, MAX_ITERATIONS + 1):
         print(f"\n{'='*20} PIPELINE ITERATION {iteration} {'='*20}")
 
-        # 1. LOAD FULL CONTENT & LOOP DETECTION
         with open(target_model, 'r') as f:
             current_model_content = f.read()
 
@@ -139,9 +159,8 @@ def main():
             break
         last_model_content = current_model_content
 
-        print(f"[*] Found {len(fixable_errors)} mismatches. Starting Synchronous Repair on FULL file...")
+        print(f"[*] Found {len(fixable_errors)} mismatches. Starting Repair...")
 
-        # 2. INCREMENTAL REPAIR PHASE
         for entry in fixable_errors:
             assertion_text = entry.get('assertion')
             error_trace = entry.get('trace')
@@ -154,35 +173,13 @@ def main():
             else:
                 print(f"\n[*] Engine repairing: {assertion_text[:50]}...")
                 
-                # Contextual prompts based on the desired result vs current state
                 if str(desired).lower() == "invalid" and str(status).lower() == "valid":
-                    if "reaches" in assertion_text or "[]" in assertion_text and "<>" not in assertion_text:
-                        # Safety / Reachability - We want to PREVENT a bad state
-                        error_context = (
-                            f"Assertion: {assertion_text}\n"
-                            f"Goal: This bad state must be UNREACHABLE (INVALID), but currently PAT found a path to it (VALID).\n"
-                            f"Failure: You are missing strict safety guards. You MUST locate the events that cause this state "
-                            f"(e.g., lock_door, consume_fuel, owner_exit) and add strict negative guards or atomic variable updates "
-                            f"to make this state mathematically impossible to reach.\n"
-                            f"Trace: {error_trace}"
-                        )
+                    if "reaches" in assertion_text or ("[]" in assertion_text and "<>" not in assertion_text):
+                        error_context = f"Assertion: {assertion_text}\nGoal: Must be INVALID (Unreachable).\nTrace: {error_trace}"
                     else:
-                        # Liveness - We want to intentionally ALLOW starvation
-                        error_context = (
-                            f"Assertion: {assertion_text}\n"
-                            f"Goal: This liveness assertion currently evaluates to VALID, but it MUST evaluate to INVALID.\n"
-                            f"Failure: The system is structurally biased or too fair. You MUST introduce a valid path (an infinite loop or a deadlock) "
-                            f"where this goal is NEVER reached. Ensure mathematical symmetry so competing processes can infinitely starve each other.\n"
-                            f"Trace: {error_trace}"
-                        )
+                        error_context = f"Assertion: {assertion_text}\nGoal: Must be INVALID (Allow Starvation). Delete turn variables and allow non-deterministic choice.\nTrace: {error_trace}"
                 elif str(desired).lower() == "valid" and str(status).lower() == "invalid":
-                    error_context = (
-                        f"Assertion: {assertion_text}\n"
-                        f"Goal: This assertion evaluates to INVALID, but it MUST evaluate to VALID.\n"
-                        f"Failure: The system is over-constrained, deadlocked, or stuck in a stuttering livelock (an infinite loop of non-productive events). "
-                        f"You MUST remove artificial 'idle' or 'skip' self-loops, break reversible action loops, and ensure the 'happy path' guards allow the actors to progress.\n"
-                        f"Trace: {error_trace}"
-                    )
+                    error_context = f"Assertion: {assertion_text}\nGoal: Must be VALID (Prevent Starvation/Livelock).\nTrace: {error_trace}"
                 else:
                     error_context = f"Assertion: {assertion_text}\nTrace: {error_trace}"
 
@@ -191,16 +188,25 @@ def main():
                 error_log=error_context,
                 target_assertion=assertion_text,
                 other_assertions=[],
-                desired_result=desired  # <--- FIXED: Now explicitly passing desired result to engine.py
+                desired_result=desired
             )
 
             if repair_result.get("status") in ["success", "repaired"]:
                 new_content = repair_result.get("model", "").strip()
                 
+                # --- DYNAMIC OUTPUT SCRUBBER ---
+                if new_content and expected_target and base_name:
+                    # 1. Standardize the Process Definition 
+                    # (Turns sys = OR sys() = into the correct expected_target)
+                    new_content = re.sub(rf'^{base_name}(\s*\(\))?\s*=', f'{expected_target} =', new_content, flags=re.MULTILINE)
+                    
+                    # 2. Standardize all Assertions
+                    # (Turns #assert sys |= OR #assert sys() |= into the correct expected_target)
+                    new_content = re.sub(rf'#assert\s+{base_name}(\s*\(\))?\s*\|=', f'#assert {expected_target} |=', new_content)
+
                 if new_content and new_content != current_model_content:
                     with open(repaired_path, 'w') as f:
                         f.write(new_content)
-                    
                     current_model_content = new_content
                     print(f"    [SUCCESS] Fix saved to {repaired_path}")
                     time.sleep(1) 
@@ -212,27 +218,19 @@ def main():
 
         target_model = repaired_path
 
-        # 3. VERIFICATION PHASE (Post-Repair)
         print(f"\n[*] Verifying new state: {target_model}")
         raw_verifier_output = verifier.verify_model(target_model)
         
-        # Reconcile raw output with our tracked goals (Internal memory keeps all 7)
         current_issues = reconcile_issues(current_issues, raw_verifier_output)
-        
-        # Filter down to ONLY the actual unresolved mismatches
         fixable_errors = filter_fixable_errors(current_issues)
         
-        # --- NEW LOGIC: Save ONLY the unresolved mismatches to the numbered JSON ---
         numbered_log_file = f"mismatch_traces_{iteration}.json"
-        
-        # Write directly from main.py to avoid the hardcoded print in verifier.py
         with open(numbered_log_file, 'w') as f:
             json.dump(fixable_errors, f, indent=2)
             
-        print(f"📂 Found {len(fixable_errors)} unresolved issues. Generated trace history: {numbered_log_file}")
-        
+        print(f"📂 Found {len(fixable_errors)} unresolved issues. Log: {numbered_log_file}")
         if not fixable_errors:
-            print(f"[🎉] Success! Issues resolved and no new mismatches found. Model verified.")
+            print(f"[🎉] Success! Issues resolved and no new mismatches found.")
             break
         
     print(f"\n[*] Pipeline finished.")

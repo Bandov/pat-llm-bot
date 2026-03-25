@@ -49,6 +49,10 @@ RULES = {
         "    choice operator '[] x:{0..3} @', you MUST wrap the entire generalized choice block in parentheses. "
         "    Example: 'event1 -> Proc() [] ([] x:{0..3} @ event2.x -> Proc())'. Writing '[] [] x:{0..3} @' "
         "    without parentheses will cause a fatal syntax parsing error."
+        "18. MAIN PROCESS PRESERVATION (ABSOLUTE): You MUST NOT alter the signature of the main system composition. "
+        "    If the original model defines 'railwaysys = ...' (without parentheses), you are STRICTLY FORBIDDEN "
+        "   from changing it to 'railwaysys() = ...'. You must preserve the EXACT string matching for all '#assert' lines "
+        "   from the original model. Do not add or remove spaces or parentheses in the assertions."
     ),
 
     "desired_result_alignment": (
@@ -137,6 +141,12 @@ RULES = {
         "    - For 'keylockinside': You MUST add '&& !(keyPosition == CAR_IN && ownerPositions[0] != CAR_IN && ownerPositions[1] != CAR_IN)' to ALL door locking events.\n"
         "    - For 'runwithoutowner': You MUST add '&& drivingStatus == DRIVING_STOPPED' to ALL owner exit events so they cannot jump out of a moving car.\n"
         "    - For 'drivewithoutfuel': You MUST atomically add 'drivingStatus = DRIVING_STOPPED; engineStatus = ENGINE_OFF;' to the exact event that sets fuel to EMPTY."
+        "16. SHADOW EVENT BAN (ABSOLUTE): You are strictly forbidden from creating 'shadow' "
+        "    or alternate versions of critical events (e.g., inventing 'start_driving_engine_off' "
+        "    alongside the canonical 'start_driving'). All transitions for a logical action MUST "
+        "    use the single, original event name. Creating shadow events allows the system to infinitely "
+        "    bypass liveness goals. If you need to restrict an action, add a guard to the ORIGINAL event; "
+        "    do NOT split it into multiple named events."
     ),
 
     "cross_process_interlocking": (
@@ -231,6 +241,12 @@ RULES = {
         "    Create a variable (e.g., 'var window_moves = 0;'), gate the toggle events with '[window_moves < 2]', increment it "
         "    on toggle, and reset it ONLY when the main system goal (e.g., 'start_driving') occurs. You must physically "
         "    exhaust the system's ability to stutter."
+        "16. RESOURCE REFILL LIVELOCK BAN: If a liveness trace gets trapped in an infinite loop of "
+        "    depleting and refilling a resource (e.g., 'consume_fuel -> refuel -> consume_fuel') "
+        "    without achieving the primary system goal, you MUST force the actors to complete the "
+        "    intended lifecycle before they can trigger the refill/reset. Gate the 'refuel' or 'reset' "
+        "    events so they can only occur IF the system has successfully completed its main purpose "
+        "    at least once in that cycle."
     ),
 
     "resource_management": (
