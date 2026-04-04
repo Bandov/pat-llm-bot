@@ -165,7 +165,6 @@ class RepairEngine:
 
             # DYNAMIC TASK DIRECTIVE based on the desired result
             if str(desired_result).lower() == "invalid":
-                # --- NEW DYNAMIC INJECTION FOR LIVENESS STARVATION ---
                 if "<>" in target_assertion:
                     task_directive = (
                         "========================================================================\n"
@@ -178,14 +177,20 @@ class RepairEngine:
                         "- Ensure it is mathematically possible for one actor to infinitely loop while the other waits forever.\n"
                         "========================================================================\n"
                     )
+                elif "reaches" in target_assertion:
+                    task_directive = (
+                        f"CRITICAL TASK: The target assertion ({target_assertion}) MUST FAIL (Evaluate to INVALID).\n"
+                        f"Because this is a 'reaches' property, an 'INVALID' result means the target state MUST BE MATHEMATICALLY UNREACHABLE.\n"
+                        f"Your goal is to MAKE THE SYSTEM SAFER by finding the specific events that lead to this state and ADDING STRICT NEGATIVE GUARDS to prevent it from happening."
+                    )
                 else:
-                    # Standard safety invalidation
                     task_directive = (
                         f"CRITICAL TASK: The target assertion ({target_assertion}) MUST FAIL. \n"
-                        f"Your goal is to INTENTIONALLY EXPOSE A FLAW (e.g., allow starvation, deadlock, or race conditions) "
-                        f"so that this specific assertion evaluates to INVALID. Do NOT use fairness injections here."
+                        f"Because this is a global safety property ([]), your goal is to INTENTIONALLY EXPOSE A FLAW "
+                        f"(e.g., remove guards, allow race conditions) so that the assertion evaluates to INVALID."
                     )
             else:
+                # THIS WAS THE MISSING BLOCK
                 task_directive = (
                     f"CRITICAL TASK: The target assertion ({target_assertion}) MUST PASS. \n"
                     f"Your goal is to FIX the model so this assertion evaluates to VALID."
@@ -214,64 +219,80 @@ class RepairEngine:
         {full_context}
         
         [INSTRUCTIONS]
-        - Output ONLY the FULL repaired model.
-        - You MUST follow the syntax examples provided in the system context.
-        - Return ONLY raw CSP# text (no prose, no markdown).
+        You MUST respond with a strictly valid JSON object. Do not include markdown blocks outside the JSON.
+        The JSON object must contain exactly two keys:
+        1. "chain_of_thought": A string where you briefly explain why the trace fails and what you are changing.
+        2. "repaired_code": A string containing the ENTIRE repaired CSP# model. 
+        
+        DO NOT output 'INVALID_ASSERTION'. You MUST output the full modified code in the 'repaired_code' key.
         """
 
-        try:
-            print(f"[*] Calling {self.model_id} (Target: {str(desired_result).upper()})...")
-            response = self.client.models.generate_content(
-                model=self.model_id, 
-                contents=prompt,
-                config={'system_instruction': self.mandatory_syntax}
-            )
-            
-            parsed = self._parse_response(response.text)
-            output = self._clean_output(parsed["content"])
-            sanitized = self._global_sanitizer(output)
+        max_retries = 5
+        base_delay = 2
 
-            # if parsed["status"] == "invalid_assertion":
-            #     base_model = sanitized if sanitized else full_context
-            #     tagged = self._tag_invalid_assertion(base_model, target_assertion)
-            #     return {
-            #         "status": "invalid_assertion",
-            #         "model": tagged,
-            #         "reason": parsed.get("reason") or "No reason provided."
-            #     }
+        # --- EXPONENTIAL BACKOFF RETRY LOOP ---
+        for attempt in range(max_retries):
+            try:
+                print(f"[*] Calling {self.model_id} (Target: {str(desired_result).upper()})...")
+                response = self.client.models.generate_content(
+                    model=self.model_id, 
+                    contents=prompt,
+                    config={
+                        'system_instruction': self.mandatory_syntax, 
+                        'temperature': 0.2,
+                        'response_mime_type': 'application/json' 
+                    }
+                )
+                
+                parsed = self._parse_response(response.text)
+                output = self._clean_output(parsed["content"])
+                sanitized = self._global_sanitizer(output)
+                sanitized = self._restore_original_assertions(full_context, sanitized)
 
-            # if self._too_destructive(full_context, sanitized, drop_ratio=0.50):
-            #     tagged = self._tag_invalid_assertion(full_context, target_assertion)
-            #     return {
-            #         "status": "invalid_assertion",
-            #         "model": tagged,
-            #         "reason": "Repair required deleting/renaming existing event branches; violates non-destructive constraint."
-            #     }
+                return {"status": "repaired", "model": sanitized, "reason": None}
 
-            return {"status": "repaired", "model": sanitized, "reason": None}
-
-        except Exception as e:
-            if "429" in str(e):
-                print("[!] Quota hit. Waiting 60s..."); time.sleep(60)
-                return self.request_repair(full_context, error_log, target_assertion, other_assertions, desired_result)
-            return {"status": "error", "model": "", "reason": str(e)}
+            except Exception as e:
+                error_str = str(e)
+                # Catch 503 (Unavailable), 429 (Too Many Requests/Quota)
+                if "503" in error_str or "UNAVAILABLE" in error_str or "429" in error_str:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        print(f"    [!] API busy/Quota hit. Retrying in {delay}s... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        print(f"    [!] Max retries reached for API issues.")
+                        return {"status": "error", "model": "", "reason": f"API Unavailable after {max_retries} attempts: {error_str}"}
+                else:
+                    # If it's a structural error, bad request, etc., fail immediately
+                    return {"status": "error", "model": "", "reason": error_str}
         
     def _parse_response(self, text):
-        stripped = text.replace("```csp", "").replace("```", "").strip()
-        if not stripped:
-            return {"status": "error", "model": "", "reason": "Empty response", "content": ""}
+        try:
+            # Parse the guaranteed JSON response
+            data = json.loads(text)
+            content = data.get("repaired_code", "").strip()
+            reasoning = data.get("chain_of_thought", "")
+            
+            if not content:
+                return {"status": "error", "model": "", "reason": "Empty code in JSON response", "content": ""}
 
-        lines = stripped.splitlines()
-        first_line = lines[0].strip()
+            lines = content.splitlines()
+            first_line = lines[0].strip() if lines else ""
 
-        # Catch INVALID_ASSERTION even if it's jumbled on the first line
-        if "INVALID_ASSERTION" in first_line:
-            reason = first_line.replace("INVALID_ASSERTION", "").replace(":", "").strip()
-            # Drop the contaminated first line entirely so it doesn't pollute the code
-            content = "\n".join(lines[1:]).strip()
-            return {"status": "invalid_assertion", "model": "", "reason": reason, "content": content}
+            # Catch INVALID_ASSERTION if the LLM flagged it
+            if "INVALID_ASSERTION" in first_line:
+                reason = first_line.replace("INVALID_ASSERTION", "").replace(":", "").strip()
+                clean_content = "\n".join(lines[1:]).strip()
+                return {"status": "invalid_assertion", "model": "", "reason": reason, "content": clean_content}
 
-        return {"status": "repaired", "model": "", "reason": None, "content": stripped}
+            # Optional: You could print the reasoning here to your terminal if you want to see the LLM's thought process!
+            # print(f"    [LLM Thinking]: {reasoning}")
+
+            return {"status": "repaired", "model": "", "reason": None, "content": content}
+
+        except json.JSONDecodeError as e:
+            return {"status": "error", "model": "", "reason": f"Failed to parse JSON: {e}", "content": ""}
 
     def _clean_output(self, text):
         match = re.search(r'(#define|var|[\w]+\(\)\s*=)', text)
@@ -314,3 +335,17 @@ class RepairEngine:
         rep = self._extract_event_labels(repaired)
         if not orig: return False
         return (len(orig - rep) / len(orig)) > drop_ratio
+    
+    def _restore_original_assertions(self, original_code, repaired_code):
+        """Forces the repaired code to use the EXACT assertions from the original model."""
+        # 1. Grab all #assert lines from the original model
+        orig_asserts = re.findall(r'^#assert\s+.*$', original_code, flags=re.MULTILINE)
+        
+        # 2. Delete any #assert lines the LLM tried to write
+        repaired_code = re.sub(r'^#assert\s+.*$\n?', '', repaired_code, flags=re.MULTILINE)
+        
+        # 3. Slap the original assertions back at the very bottom
+        if orig_asserts:
+            repaired_code = repaired_code.strip() + "\n\n" + "\n".join(orig_asserts) + "\n"
+            
+        return repaired_code

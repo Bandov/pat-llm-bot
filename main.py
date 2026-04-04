@@ -196,12 +196,7 @@ def main():
                 
                 # --- DYNAMIC OUTPUT SCRUBBER ---
                 if new_content and expected_target and base_name:
-                    # 1. Standardize the Process Definition 
-                    # (Turns sys = OR sys() = into the correct expected_target)
                     new_content = re.sub(rf'^{base_name}(\s*\(\))?\s*=', f'{expected_target} =', new_content, flags=re.MULTILINE)
-                    
-                    # 2. Standardize all Assertions
-                    # (Turns #assert sys |= OR #assert sys() |= into the correct expected_target)
                     new_content = re.sub(rf'#assert\s+{base_name}(\s*\(\))?\s*\|=', f'#assert {expected_target} |=', new_content)
 
                 if new_content and new_content != current_model_content:
@@ -210,13 +205,20 @@ def main():
                     current_model_content = new_content
                     print(f"    [SUCCESS] Fix saved to {repaired_path}")
                     time.sleep(1) 
+                else:
+                    if not new_content:
+                        print("    [!] Engine issue: Returned empty model.")
+                    else:
+                        print("    [!] Engine issue: Returned identical model (No changes made by LLM).")
             
             elif repair_result.get("status") == "invalid_assertion":
                 print(f"    [SKIP] Engine flagged assertion as invalid.")
             else:
                 print(f"    [!] Engine failed: {repair_result.get('reason', 'Unknown error')}")
 
-        target_model = repaired_path
+        # SAFELY update target_model only if the file was actually written
+        if os.path.exists(repaired_path):
+            target_model = repaired_path
 
         print(f"\n[*] Verifying new state: {target_model}")
         raw_verifier_output = verifier.verify_model(target_model)
